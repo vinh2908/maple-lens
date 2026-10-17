@@ -5,7 +5,7 @@ import { AppError, providerError } from "./api-errors";
 import { limitApi } from "./rate-limit";
 
 export const COOKIE_NAME = "maple_session";
-export const DEFAULT_MODEL = "gemini-3.1-flash-lite";
+export const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 export function isLocal(req: NextRequest) {
   try { return LOCAL_HOSTS.includes(new URL(`http://${req.headers.get("host")}`).hostname); }
