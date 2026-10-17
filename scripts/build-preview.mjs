@@ -1,0 +1,10 @@
+import { spawnSync } from 'node:child_process';
+import { cpSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
+const result=spawnSync(process.execPath,['node_modules/next/dist/bin/next','build'],{stdio:'inherit',env:{...process.env,MAPLE_PREVIEW_BUILD:'1',NEXT_PUBLIC_PREVIEW_ONLY:'true'}});
+if(result.status!==0) process.exit(result.status ?? 1);
+rmSync('dist',{recursive:true,force:true});
+mkdirSync('dist/_next',{recursive:true});
+copyFileSync('.next-preview/server/app/index.html','dist/index.html');
+cpSync('.next-preview/static','dist/_next/static',{recursive:true});
+cpSync('public','dist',{recursive:true});
+console.log('Static interface demo packaged in dist/. Gemini backend is available in the full Next.js source only.');

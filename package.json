@@ -1,0 +1,39 @@
+{
+  "name": "maple-lens",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "build:preview": "node scripts/build-preview.mjs",
+    "build:site": "node scripts/build-site.mjs",
+    "db:generate": "drizzle-kit generate",
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:regional": "node scripts/smoke-regional.mjs",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@google/genai": "latest",
+    "lucide-react": "latest",
+    "next": "16.4.2",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-easy-crop": "latest",
+    "server-only": "latest",
+    "sharp": "latest",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "drizzle-kit": "^0.31.11",
+    "drizzle-orm": "^0.45.4",
+    "esbuild": "^0.28.2",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
