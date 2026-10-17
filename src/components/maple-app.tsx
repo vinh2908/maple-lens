@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Cropper from "react-easy-crop";
-import { ArrowDown, ArrowRight, Camera, Check, CheckCheck, ChevronDown, CircleHelp, Clock3, Copy, Crop, Expand, FileImage, ImagePlus, Leaf, LoaderCircle, LockKeyhole, Maximize, RotateCcw, RotateCw, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, Wifi, X, AlertCircle, ZoomIn } from "lucide-react";
+import { ArrowDown, ArrowRight, Camera, Check, CheckCheck, ChevronDown, CircleHelp, ClipboardPaste, Clock3, Copy, Crop, Expand, FileImage, ImagePlus, Leaf, LoaderCircle, LockKeyhole, Maximize, RotateCcw, RotateCw, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, Wifi, X, AlertCircle, ZoomIn } from "lucide-react";
 import { ACCEPTED_TYPES, type AnalysisResult, type ApiErrorBody, type ServerStatus, validateAnalysis } from "@/lib/contracts";
 import { autoCropPopup, canvasBlob, cropImage, prepareFile, type PixelCrop } from "@/lib/image";
 import type { PopupType } from "@/lib/popup-detection";
@@ -259,6 +259,45 @@ export default function MapleApp() {
     if (!file) { setNotice({ kind: "info", text: "Clipboard chưa có ảnh. Hãy sao chép ảnh hoặc chụp màn hình rồi dán lại." }); return; }
     pendingPaste.current = acceptFile(file);
   }
+  async function pasteFromClipboard() {
+    if (fileBusy.current || reading || busy) return;
+    setNotice(null);
+    if (!navigator.clipboard || typeof navigator.clipboard.read !== "function") {
+      imagePanelRef.current?.focus({ preventScroll: true });
+      setNotice({ kind: "info", text: "Trình duyệt chưa hỗ trợ nút dán trực tiếp. Bạn hãy bấm vào ô này và nhấn Ctrl + V (hoặc ⌘ + V) để dán ảnh." });
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      let imageBlob: Blob | null = null;
+      let mimeType = "image/png";
+      for (const item of items) {
+        const type = item.types.find(t => t.startsWith("image/"));
+        if (type) {
+          imageBlob = await item.getType(type);
+          mimeType = type;
+          break;
+        }
+      }
+      if (!imageBlob) {
+        setNotice({ kind: "info", text: "Trong bộ nhớ tạm (clipboard) chưa có ảnh. Hãy chụp màn hình hoặc sao chép ảnh rồi bấm Dán ảnh." });
+        return;
+      }
+      const ext = mimeType.split("/")[1] || "png";
+      const file = new File([imageBlob], `clipboard-${Date.now()}.${ext}`, { type: mimeType });
+      const task = acceptFile(file);
+      pendingPaste.current = task;
+      await task;
+    } catch (e) {
+      imagePanelRef.current?.focus({ preventScroll: true });
+      const err = e as Error;
+      if (err.name === "NotAllowedError" || err.message?.toLowerCase().includes("denied") || err.message?.toLowerCase().includes("permission")) {
+        setNotice({ kind: "info", text: "Chưa được cấp quyền truy cập clipboard. Bạn hãy nhấn Ctrl + V (hoặc ⌘ + V) để dán trực tiếp." });
+      } else {
+        setNotice({ kind: "info", text: "Không đọc được ảnh từ clipboard. Bạn hãy nhấn Ctrl + V (hoặc ⌘ + V) để dán trực tiếp." });
+      }
+    }
+  }
   async function analyzeOnEnter(e: React.KeyboardEvent<HTMLElement>) {
     if (e.key !== "Enter" || e.nativeEvent.isComposing || e.target !== e.currentTarget) return;
     e.preventDefault();
@@ -346,7 +385,10 @@ export default function MapleApp() {
             <div className="upload-illustration" aria-hidden="true"><div className="scan-corner tl" /><div className="scan-corner tr" /><div className="scan-corner bl" /><div className="scan-corner br" /><span className="sample-glyph" lang="ko">한</span><span className="tiny-spark">✦</span><span className="camera-badge"><Camera size={17} /></span></div>
             <h3>{reading ? "Đang tự tìm popup…" : "Chụp ảnh, tự tìm thử thách"}</h3><p>Giữ trọn popup trong khung hình.<br />MapleLens tự quét và cắt vùng cần đọc.</p>
             <button className="primary camera-primary" onClick={openCamera} disabled={reading || !!busy}><Camera size={18} /> Mở camera sau <ArrowRight size={17} /></button>
-            <button className="secondary upload-secondary" onClick={() => upload.current?.click()} disabled={reading || !!busy}><ImagePlus size={17} /> Chọn ảnh từ thư viện</button>
+            <div className="upload-actions-row">
+              <button className="secondary upload-secondary" title="Chọn ảnh từ thư viện" aria-label="Chọn ảnh từ thư viện" onClick={() => upload.current?.click()} disabled={reading || !!busy}><ImagePlus size={16} /> Chọn ảnh</button>
+              <button className="secondary paste-secondary" title="Dán ảnh từ bộ nhớ tạm (Clipboard)" aria-label="Dán ảnh" onClick={() => void pasteFromClipboard()} disabled={reading || !!busy}><ClipboardPaste size={16} /> Dán ảnh</button>
+            </div>
             <span className="upload-hint">JPEG, PNG, WebP · Ảnh gốc tối đa 15 MB</span>
           </div> : <div className="image-workspace">
             <div className="image-toolbar">
