@@ -140,18 +140,19 @@ export function detectPopupPixels(data: Uint8ClampedArray, width: number, height
       if (!hint.hasText) continue;
       if (hint.type === "unknown" && fraction < 0.04) continue;
 
-      const padding = Math.max(3, Math.round(Math.min(region.width, region.height) * 0.025));
-      const x = Math.max(0, region.x - padding);
-      const y = Math.max(0, region.y - padding);
-      const right = Math.min(width, region.x + region.width + padding);
-      const bottom = Math.min(height, region.y + region.height + padding);
+      const padX = Math.max(3, Math.round(region.width * 0.025));
+      const padY = Math.max(4, Math.round(region.height * 0.035));
+      const x = Math.max(0, region.x - padX);
+      const y = Math.max(0, region.y - padY);
+      const right = Math.min(width, region.x + region.width + padX);
+      const bottom = Math.min(height, region.y + region.height + padY);
 
       candidates.push({
         bounds: { x, y, width: right - x, height: bottom - y },
         typeHint: hint.type,
         kind: kind === "blue" ? "blue" : "light",
-        alreadyFramed: fraction > 0.85,
-        score: (hint.type !== "unknown" ? 5 : 0) + Math.sqrt(fraction) * 2 + fill
+        alreadyFramed: fraction > 0.82,
+        score: (kind === "blue" ? 25 : 0) + (hint.type !== "unknown" ? 10 : 0) + Math.sqrt(fraction) * 2 + fill
       });
     }
   }
