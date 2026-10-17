@@ -13,20 +13,23 @@ type Notice = { kind: "error" | "success" | "info"; text: string };
 const typeLabels = { distorted_text: "Dạng 1 · Chữ biến dạng", sentence_choice: "Dạng 2 · Chọn câu", unknown: "Chưa xác định loại" };
 const PREVIEW_ONLY = process.env.NEXT_PUBLIC_PREVIEW_ONLY === "true";
 
-async function request<T>(path: string, init?: RequestInit, timeout = 45_000): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, timeout = 15_000, abortSignal?: AbortSignal): Promise<T> {
   if (PREVIEW_ONLY) {
     if (path === "/api/status") return { configured: false, model: "demo", authenticated: true, authRequired: false, authUnavailable: false } as T;
     throw new Error("Đây là demo giao diện chưa kết nối Gemini. Bạn có thể chọn ảnh, cắt/xoay và xem kết quả minh họa. Phân tích thật cần chạy mã nguồn với API key riêng trên máy chủ.");
   }
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  const combinedSignal = abortSignal ? AbortSignal.any([timeoutSignal, abortSignal]) : timeoutSignal;
   try {
-    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(timeout), cache: "no-store" });
+    const res = await fetch(path, { ...init, signal: combinedSignal, cache: "no-store" });
     let data: T & ApiErrorBody;
     try { data = await res.json(); }
     catch { throw new Error("Máy chủ trả về dữ liệu không hợp lệ. Chưa có kết quả phân tích."); }
     if (!res.ok) throw new Error(data.error?.message || "Yêu cầu chưa thành công. Vui lòng thử lại.");
     return data;
   } catch (e) {
-    if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") throw new Error("Yêu cầu đã hết thời gian chờ. Bạn có thể bấm thử lại.");
+    if ((e as Error).name === "AbortError" && abortSignal?.aborted) throw e;
+    if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") throw new Error("Quá thời gian chờ (15s). Hãy thử lại hoặc chọn ảnh rõ hơn.");
     if (e instanceof TypeError) throw new Error("Không kết nối được máy chủ. Kiểm tra mạng và thử lại.");
     throw e;
   }
@@ -77,6 +80,8 @@ export default function MapleApp() {
   const analysisBusy = useRef(false);
   const enterBusy = useRef(false);
   const resultRef = useRef<HTMLElement>(null);
+  const activeAbort = useRef<AbortController | null>(null);
+  const inputTimestamp = useRef<number>(0);
 
   const refreshStatus = useCallback(async () => {
     try { setStatus(await request<ServerStatus>("/api/status", undefined, 10_000)); }
@@ -103,7 +108,12 @@ export default function MapleApp() {
   }, [cropOpen, cameraOpen, login, showHelp]);
 
   async function acceptFile(file?: File): Promise<Blob | null> {
-    if (!file || busy || reading || fileBusy.current || analysisBusy.current) return null;
+    if (!file || fileBusy.current) return null;
+    inputTimestamp.current = performance.now();
+    activeAbort.current?.abort();
+    activeAbort.current = null;
+    analysisBusy.current = false;
+    setBusy(null);
     pendingPaste.current = null;
     fileBusy.current = true;
     setReading(true); setNotice(null); setResult(null); setImage(null); setOriginalImage(null); setAutoInfo(null);
@@ -200,23 +210,50 @@ export default function MapleApp() {
     finally { setReading(false); }
   }
   async function analyze(targetImage: Blob | null = image) {
-    if (!targetImage || busy || analysisBusy.current) return;
+    if (!targetImage || analysisBusy.current) return;
+    activeAbort.current?.abort();
+    const controller = new AbortController();
+    activeAbort.current = controller;
     analysisBusy.current = true;
     setResult(null); setNotice(null); setBusy("analyze");
+    const tActionStart = performance.now();
     try {
       const body = new FormData(); body.append("image", targetImage, "challenge.jpg");
       if (autoInfo?.typeHint && autoInfo.typeHint !== "unknown") {
         body.append("typeHint", autoInfo.typeHint);
       }
-      const data = await request<AnalysisResult>("/api/analyze", { method: "POST", body });
-      setResult({ ...data, analysis: validateAnalysis(data.analysis) });
-      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
-    } catch (e) { setNotice({ kind: "error", text: (e as Error).message }); }
-    finally { setBusy(null); analysisBusy.current = false; }
+      const tNetworkStart = performance.now();
+      const data = await request<AnalysisResult>("/api/analyze", { method: "POST", body }, 15_000, controller.signal);
+      const networkMs = Math.round(performance.now() - tNetworkStart);
+      const actionToAnswerMs = Math.round(performance.now() - tActionStart);
+      const totalFromInputMs = inputTimestamp.current ? Math.round(performance.now() - inputTimestamp.current) : actionToAnswerMs;
+
+      const timings = {
+        actionToAnswerMs,
+        totalFromInputMs,
+        cropScanMs: autoInfo?.elapsedMs || 0,
+        networkMs,
+        serverMs: data.serverMs || 0,
+        geminiMs: data.geminiMs || 0,
+        imagePrepMs: data.imagePrepMs || 0,
+      };
+
+      setResult({ ...data, analysis: validateAnalysis(data.analysis), timings });
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) {
+      if ((e as Error).name === "AbortError" && controller.signal.aborted) return;
+      setNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      if (activeAbort.current === controller) {
+        setBusy(null);
+        analysisBusy.current = false;
+        activeAbort.current = null;
+      }
+    }
   }
   function pasteImage(e: React.ClipboardEvent<HTMLElement>) {
     e.preventDefault();
-    if (busy || reading || fileBusy.current || analysisBusy.current) return;
+    if (fileBusy.current) return;
     const file = Array.from(e.clipboardData.items).find(item => item.kind === "file" && item.type.startsWith("image/"))?.getAsFile()
       || Array.from(e.clipboardData.files).find(file => file.type.startsWith("image/"));
     if (!file) { setNotice({ kind: "info", text: "Clipboard chưa có ảnh. Hãy sao chép ảnh hoặc chụp màn hình rồi dán lại." }); return; }
@@ -259,8 +296,13 @@ export default function MapleApp() {
     catch { setNotice({ kind: "info", text: "Chưa sao chép được. Hãy nhấn giữ phần chữ Hàn để chọn và sao chép thủ công." }); }
   }
   function clearImage() {
-    if (reading || busy) return;
+    activeAbort.current?.abort();
+    activeAbort.current = null;
+    analysisBusy.current = false;
+    setBusy(null);
+    setReading(false);
     pendingPaste.current = null;
+    inputTimestamp.current = 0;
     setImage(null); setImageUrl(null); setOriginalImage(null); setAutoInfo(null);
     setImageName(""); setResult(null); setNotice(null); setIsDemo(false); setCopied(false);
     setCropOpen(false); setPixels(null); setCrop({ x: 0, y: 0 }); setZoom(1); setRotation(0); setDragging(false);
@@ -307,9 +349,30 @@ export default function MapleApp() {
             <button className="secondary upload-secondary" onClick={() => upload.current?.click()} disabled={reading || !!busy}><ImagePlus size={17} /> Chọn ảnh từ thư viện</button>
             <span className="upload-hint">JPEG, PNG, WebP · Ảnh gốc tối đa 15 MB</span>
           </div> : <div className="image-workspace">
-            <div className="image-toolbar"><span><span className="status-dot" />{isDemo ? "Ảnh minh họa tự tạo" : "Ảnh sẵn sàng"}</span><div><button title="Cắt vùng thử thách" aria-label="Cắt vùng thử thách" onClick={openCrop} disabled={reading || !!busy}><Crop size={17} /> Chỉnh</button><button title="Xoay ảnh 90 độ" aria-label="Xoay ảnh 90 độ" onClick={rotateImage} disabled={reading || !!busy}><RotateCw size={17} /> Xoay</button><button title="Đổi ảnh" aria-label="Đổi ảnh" onClick={() => upload.current?.click()} disabled={reading || !!busy}><ImagePlus size={17} /></button></div></div>
+            <div className="image-toolbar">
+              <span><span className="status-dot" />{isDemo ? "Ảnh minh họa tự tạo" : "Ảnh sẵn sàng"}</span>
+              <div>
+                <button title="Cắt vùng thử thách" aria-label="Cắt vùng thử thách" onClick={openCrop} disabled={reading || !!busy}><Crop size={17} /> Chỉnh</button>
+                <button title="Xoay ảnh 90 độ" aria-label="Xoay ảnh 90 độ" onClick={rotateImage} disabled={reading || !!busy}><RotateCw size={17} /> Xoay</button>
+                <button title="Chọn ảnh khác từ thư viện" aria-label="Đổi ảnh" onClick={() => upload.current?.click()}><ImagePlus size={17} /> Đổi ảnh</button>
+                <button title="Xóa ảnh này" aria-label="Xóa ảnh" onClick={clearImage} className="delete-image-btn"><X size={17} /> Xóa ảnh</button>
+              </div>
+            </div>
             {autoInfo && <div className={`popup-status ${autoInfo.found ? "found" : "not-found"}`} role="status"><ScanLine size={17} /><div><b>{autoInfo.mode === "original" ? "Đang xem ảnh gốc" : autoInfo.mode === "manual" ? "Đã chỉnh vùng ảnh" : autoInfo.found ? `${autoInfo.alreadyFramed ? "Popup đã nằm gọn trong ảnh" : "Đã tự cắt popup"} · ${autoInfo.elapsedMs} ms` : "Chưa tìm rõ popup · giữ nguyên ảnh"}</b><span>{autoInfo.typeHint !== "unknown" ? `${typeLabels[autoInfo.typeHint]} · nhận dạng bố cục, AI sẽ xác nhận` : "AI sẽ tự xác định loại khi bạn bấm Phân tích"}</span></div>{originalImage && (image !== originalImage || autoInfo.mode === "original") && <button onClick={restoreOrScan} disabled={reading || !!busy}>{image !== originalImage ? "Ảnh gốc" : "Quét lại"}</button>}</div>}
-            <div className="image-preview">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={imageUrl} alt="Ảnh thử thách đã chọn để xem trước" />{reading && <div className="image-loading"><LoaderCircle className="spin" /> Đang xử lý…</div>}</div>
+            <div className="image-preview">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageUrl} alt="Ảnh thử thách đã chọn để xem trước" />
+              <button 
+                type="button" 
+                className="image-remove-badge" 
+                title="Xóa ảnh để chèn ảnh khác" 
+                aria-label="Xóa ảnh" 
+                onClick={clearImage}
+              >
+                <X size={18} />
+              </button>
+              {reading && <div className="image-loading"><LoaderCircle className="spin" /> Đang xử lý…</div>}
+            </div>
             <div className="image-file"><FileImage size={14} /><span>{imageName}</span><span>{image ? `${Math.round(image.size / 1024)} KB` : ""}</span></div>
             <div className="image-tip"><ShieldCheck size={15} /><span>Tự quét trên thiết bị. Giữ đủ câu hỏi và mọi lựa chọn trong ảnh xem trước.</span></div>
           </div>}
@@ -318,17 +381,33 @@ export default function MapleApp() {
 
         <section ref={resultRef} className={`panel result-panel ${result ? "has-result" : ""}`} aria-labelledby="result-title" aria-live="polite" aria-busy={busy === "analyze"}>
           <div className="panel-heading"><div className="panel-title"><span className="step-number muted">02</span><h2 id="result-title">Kết quả phân tích</h2></div><span className="ai-tag"><Sparkles size={12} /> GEMINI</span></div>
-          {busy === "analyze" ? <div className="result-empty"><div className="result-orb processing"><ScanLine size={29} /></div><h3>Đang đọc từng nét chữ…</h3><p>Gemini đang xem ảnh của bạn.<br />Kết quả thường cần một chút thời gian.</p><span className="elapsed"><Clock3 size={14} /> {elapsed} giây · Có thể chờ tối đa 45 giây</span></div> : result ? <div className="result-body">
+          {busy === "analyze" ? <div className="result-empty"><div className="result-orb processing"><ScanLine size={29} /></div><h3>Đang đọc từng nét chữ…</h3><p>Gemini đang xem ảnh của bạn.<br />Kết quả thường cần một chút thời gian.</p><span className="elapsed"><Clock3 size={14} /> {elapsed} giây · Có thể chờ tối đa 15 giây</span></div> : result ? <div className="result-body">
             {result.source === "demo" && <div className="demo-banner"><Sparkles size={15} /><span>KẾT QUẢ MINH HỌA · VIẾT SẴN<br /><small>Không gọi Gemini, không dùng để trả lời ảnh khác.</small></span></div>}
-            <div className="result-type"><span>{typeLabels[result.analysis.challengeType]}</span><span className="elapsed"><Clock3 size={12} />{result.source === "demo" ? "Minh họa" : `${(result.elapsedMs / 1000).toFixed(1)}s`}</span></div>
+            
+            {result.timings && (
+              <div className="timing-readout" role="status">
+                <div className="timing-headline">
+                  <span className="timing-badge">⚡ {(result.timings.actionToAnswerMs / 1000).toFixed(2)}s</span>
+                  <span>Từ khi bấm Phân tích → Có đáp án</span>
+                </div>
+                <div className="timing-stages">
+                  <span>Gemini AI: <b>{result.timings.geminiMs}ms</b></span>
+                  <span>Mạng &amp; Server: <b>{Math.max(0, result.timings.networkMs - result.timings.geminiMs)}ms</b></span>
+                  {(result.timings.cropScanMs ?? 0) > 0 && <span>Tự quét ảnh: <b>{result.timings.cropScanMs}ms</b></span>}
+                  {result.timings.totalFromInputMs && <span>Toàn luồng: <b>{(result.timings.totalFromInputMs / 1000).toFixed(2)}s</b></span>}
+                </div>
+              </div>
+            )}
+
+            <div className="result-type"><span>{typeLabels[result.analysis.challengeType]}</span><span className="elapsed"><Clock3 size={12} />{result.source === "demo" ? "Minh họa" : result.timings ? `${(result.timings.actionToAnswerMs / 1000).toFixed(2)}s` : `${(result.elapsedMs / 1000).toFixed(1)}s`}</span></div>
             {result.analysis.challengeType !== "sentence_choice" && <><div className="result-label">CHỮ NHẬN DIỆN ĐƯỢC</div><div className="recognized" lang="ko">{result.analysis.recognizedText || "Chưa đọc được nội dung"}</div></>}
             <div className={`answer-box ${result.analysis.needsClearerImage ? "uncertain" : ""}`}><div className="result-label">{result.analysis.needsClearerImage ? "CẦN ẢNH RÕ HƠN" : "ĐÁP ÁN ĐỀ XUẤT"}</div>{result.analysis.challengeType === "sentence_choice" && result.analysis.selectedOption && <div className="choice-line">Dòng {result.analysis.selectedOption}<small>Đếm từ trên xuống</small></div>}<strong lang={result.analysis.suggestedAnswer ? "ko" : "vi"}>{result.analysis.suggestedAnswer ? <>{result.analysis.suggestedAnswer}</> : "Chưa đủ cơ sở để đề xuất"}</strong><span><AlertCircle size={12} /> Gợi ý cần bạn kiểm tra lại</span></div>
             {result.analysis.uncertainSegments.length > 0 && <div className="uncertainty-list"><h3>Phần chưa chắc chắn</h3>{result.analysis.uncertainSegments.map((s, i) => <p key={i}><b lang="ko">{s.text}</b>: {s.reason}{s.alternatives.length > 0 && <span> · Có thể là: <span lang="ko">{s.alternatives.join(" / ")}</span></span>}</p>)}</div>}
             <KoreanTypingGuide key={JSON.stringify(result.analysis)} analysis={result.analysis} />
-            {result.analysis.challengeType !== "sentence_choice" && <div className="explanation"><h3><Sparkles size={14} /> Giải thích</h3><p>{result.analysis.explanation}</p></div>}
+            {result.analysis.explanation && result.analysis.explanation.trim() && <div className="explanation"><h3><Sparkles size={14} /> Giải thích</h3><p>{result.analysis.explanation}</p></div>}
 
             <button className="secondary copy-button" onClick={copyText} disabled={!result.analysis.recognizedText}>{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? "Đã sao chép" : "Sao chép chữ Hàn"}</button>
-            <div className="next-image-actions"><button className="secondary" onClick={clearImage} disabled={reading || !!busy}><Trash2 size={16} /> Xóa ảnh</button><button className="primary" onClick={takeNewPhoto} disabled={reading || !!busy}><Camera size={17} /> Chụp ảnh mới</button></div>
+            <div className="next-image-actions"><button className="secondary" onClick={clearImage}><Trash2 size={16} /> Xóa ảnh</button><button className="primary" onClick={takeNewPhoto} disabled={reading || !!busy}><Camera size={17} /> Chụp ảnh mới</button></div>
           </div> : <><div className="result-empty"><div className="result-orb"><ScanLine size={29} /><span className="orb-spark">✦</span></div><h3>Thêm một chút rõ ràng.</h3><p>Kết quả sẽ xuất hiện ở đây<br />sau khi bạn phân tích ảnh.</p><div className="empty-lines"><span /><span /><span /></div></div><div className="result-placeholder-footer"><span className="small-dot" /> Sẵn sàng khi bạn sẵn sàng</div></>}
           <div className="result-disclaimer"><ShieldCheck size={14} /><p>AI có thể đọc sai. Chỉ tham khảo gợi ý và tự thao tác trong game.</p></div>
         </section>

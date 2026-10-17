@@ -11,7 +11,7 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 export function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Không xuất được ảnh. Hãy giảm kích thước và thử lại.")), "image/jpeg", 0.94));
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Không xuất được ảnh. Hãy giảm kích thước và thử lại.")), "image/jpeg", 0.88));
 }
 export async function prepareFile(file: File): Promise<Blob> {
   if (!ACCEPTED_TYPES.includes(file.type)) throw new Error("Chỉ hỗ trợ JPEG, PNG và WebP. Với ảnh HEIC trên iPhone, hãy xuất ảnh sang JPEG hoặc chụp bằng nút camera.");
@@ -20,7 +20,7 @@ export async function prepareFile(file: File): Promise<Blob> {
   try {
     const image = await loadImage(url);
     if (image.naturalWidth * image.naturalHeight > 40_000_000) throw new Error("Ảnh vượt quá 40 megapixel. Hãy giảm kích thước trước khi chọn.");
-    const scale = Math.min(1, 2400 / Math.max(image.naturalWidth, image.naturalHeight));
+    const scale = Math.min(1, 1200 / Math.max(image.naturalWidth, image.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(image.naturalWidth * scale);
     canvas.height = Math.round(image.naturalHeight * scale);

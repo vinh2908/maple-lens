@@ -16,33 +16,53 @@ export const analysisSchema = z.object({
     grammar: z.string().max(1500),
     meaning: z.string().max(1500),
     assessment: z.string().max(1000),
-  })).max(12),
-  explanation: z.string().min(1).max(4000),
+  })).max(12).default([]),
+  explanation: z.string().max(4000).default(""),
   confidence: z.enum(["high", "medium", "low"]),
   uncertainSegments: z.array(z.object({
     text: z.string().max(1000),
     reason: z.string().max(1000),
     alternatives: z.array(z.string().max(300)).max(8),
-  })).max(20),
+  })).max(20).default([]),
   needsClearerImage: z.boolean(),
 });
 
 export type Analysis = z.infer<typeof analysisSchema>;
-export type AnalysisResult = { analysis: Analysis; elapsedMs: number; model: string; source: "gemini" | "demo" };
+export type TimingBreakdown = {
+  actionToAnswerMs: number;
+  totalFromInputMs?: number;
+  cropScanMs?: number;
+  networkMs: number;
+  serverMs: number;
+  geminiMs: number;
+  imagePrepMs: number;
+};
+export type AnalysisResult = {
+  analysis: Analysis;
+  elapsedMs: number;
+  model: string;
+  source: "gemini" | "demo";
+  serverMs?: number;
+  geminiMs?: number;
+  imagePrepMs?: number;
+  timings?: TimingBreakdown;
+};
 export type ApiErrorBody = { error: { code: string; message: string; retryAfter?: number } };
 export type ServerStatus = { configured: boolean; model: string; authenticated: boolean; authRequired: boolean; authUnavailable: boolean };
 
 export function validateAnalysis(raw: unknown): Analysis {
   const result = analysisSchema.parse(raw);
   if (result.challengeType === "sentence_choice") {
-    if (result.options.length < 2 || result.options.some((o, i) => o.index !== i + 1)) {
-      throw new Error("INVALID_OPTIONS");
+    if (result.options && result.options.length > 0) {
+      if (result.options.length < 2 || result.options.some((o, i) => o.index !== i + 1)) {
+        throw new Error("INVALID_OPTIONS");
+      }
+      if (result.selectedOption !== null) {
+        const option = result.options.find(o => o.index === result.selectedOption);
+        if (!option || option.text !== result.suggestedAnswer) throw new Error("INVALID_SELECTION");
+      } else if (result.suggestedAnswer !== null) throw new Error("INVALID_SELECTION");
     }
-    if (result.selectedOption !== null) {
-      const option = result.options.find(o => o.index === result.selectedOption);
-      if (!option || option.text !== result.suggestedAnswer) throw new Error("INVALID_SELECTION");
-    } else if (result.suggestedAnswer !== null) throw new Error("INVALID_SELECTION");
-  } else if (result.options.length || result.selectedOption !== null) {
+  } else if ((result.options && result.options.length > 0) || result.selectedOption !== null) {
     throw new Error("INVALID_OPTIONS");
   }
   if (result.needsClearerImage || result.confidence === "low" || result.challengeType === "unknown") {

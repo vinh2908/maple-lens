@@ -24,7 +24,7 @@ function mocks() {
       calls.analyze++;
       assert.equal(type, "image/jpeg");
       assert.equal((await sharp(Buffer.from(data, "base64")).metadata()).format, "jpeg");
-      return { analysis: demoResult.analysis, model: env.GEMINI_MODEL };
+      return { analysis: demoResult.analysis, model: env.GEMINI_MODEL, geminiMs: 42 };
     },
   } };
 }
