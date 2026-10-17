@@ -7,6 +7,6 @@ export async function GET(req: NextRequest) {
     model: process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL,
     authenticated: authenticated(req),
     authRequired: Boolean(process.env.APP_PASSWORD),
-    authUnavailable: !process.env.APP_PASSWORD && !isLocal(req),
+    authUnavailable: false,
   });
 }

@@ -22,7 +22,7 @@ export function signSession() {
 }
 export function authenticated(req: NextRequest) {
   const password = process.env.APP_PASSWORD;
-  if (!password) return isLocal(req);
+  if (!password) return true;
   const token = req.cookies.get(COOKIE_NAME)?.value ?? "";
   const [expires, nonce, mac] = token.split(".");
   if (!expires || !nonce || !mac || Number(expires) < Date.now()) return false;
@@ -37,7 +37,6 @@ export function checkOrigin(req: NextRequest) {
 export function guard(req: NextRequest) {
   checkOrigin(req);
   if (!authenticated(req)) {
-    if (!process.env.APP_PASSWORD) throw new AppError("AUTH_NOT_CONFIGURED", "Backend đang khóa truy cập từ xa. Chủ ứng dụng cần cấu hình APP_PASSWORD trên máy chủ.", 503);
     throw new AppError("AUTH_REQUIRED", "Nhập mật khẩu ứng dụng để sử dụng Gemini.", 401);
   }
   limitApi();

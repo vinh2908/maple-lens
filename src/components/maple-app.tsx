@@ -304,9 +304,30 @@ export default function MapleApp() {
             <button className="secondary upload-secondary" onClick={() => upload.current?.click()} disabled={reading || !!busy}><ImagePlus size={17} /> Chọn ảnh từ thư viện</button>
             <span className="upload-hint">JPEG, PNG, WebP · Ảnh gốc tối đa 15 MB</span>
           </div> : <div className="image-workspace">
-            <div className="image-toolbar"><span><span className="status-dot" />{isDemo ? "Ảnh minh họa tự tạo" : "Ảnh sẵn sàng"}</span><div><button title="Cắt vùng thử thách" aria-label="Cắt vùng thử thách" onClick={openCrop} disabled={reading || !!busy}><Crop size={17} /> Chỉnh</button><button title="Xoay ảnh 90 độ" aria-label="Xoay ảnh 90 độ" onClick={rotateImage} disabled={reading || !!busy}><RotateCw size={17} /> Xoay</button><button title="Đổi ảnh" aria-label="Đổi ảnh" onClick={() => upload.current?.click()} disabled={reading || !!busy}><ImagePlus size={17} /></button></div></div>
-            {autoInfo && <div className={`popup-status ${autoInfo.found ? "found" : "not-found"}`} role="status"><ScanLine size={17} /><div><b>{autoInfo.mode === "original" ? "Đang xem ảnh gốc" : autoInfo.mode === "manual" ? "Đã chỉnh vùng ảnh" : autoInfo.found ? `${autoInfo.alreadyFramed ? "Popup đã nằm gọn trong ảnh" : "Đã tự cắt popup"} · ${autoInfo.elapsedMs} ms` : "Chưa tìm rõ popup · giữ nguyên ảnh"}</b><span>{autoInfo.typeHint !== "unknown" ? `${typeLabels[autoInfo.typeHint]} · nhận dạng bố cục, AI sẽ xác nhận` : "AI sẽ tự xác định loại khi bạn bấm Phân tích"}</span></div>{originalImage && (image !== originalImage || autoInfo.mode === "original") && <button onClick={restoreOrScan} disabled={reading || !!busy}>{image !== originalImage ? "Ảnh gốc" : "Quét lại"}</button>}</div>}
-            <div className="image-preview">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={imageUrl} alt="Ảnh thử thách đã chọn để xem trước" />{reading && <div className="image-loading"><LoaderCircle className="spin" /> Đang xử lý…</div>}</div>
+            <div className="image-toolbar">
+              <span><span className="status-dot" />{isDemo ? "Ảnh minh họa tự tạo" : "Ảnh sẵn sàng"}</span>
+              <div>
+                <button title="Cắt vùng thử thách" aria-label="Cắt vùng thử thách" onClick={openCrop} disabled={reading || !!busy}><Crop size={17} /> Chỉnh</button>
+                <button title="Xoay ảnh 90 độ" aria-label="Xoay ảnh 90 độ" onClick={rotateImage} disabled={reading || !!busy}><RotateCw size={17} /> Xoay</button>
+                <button title="Chọn ảnh khác từ thư viện" aria-label="Chèn ảnh khác" onClick={() => upload.current?.click()} disabled={reading || !!busy}><ImagePlus size={17} /> Đổi ảnh</button>
+                <button title="Xóa ảnh này" aria-label="Xóa ảnh" onClick={clearImage} disabled={reading || !!busy} className="delete-image-btn"><X size={17} /> Xóa ảnh</button>
+              </div>
+            </div>
+            <div className="image-preview">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageUrl} alt="Ảnh thử thách đã chọn để xem trước" />
+              <button 
+                type="button" 
+                className="image-remove-badge" 
+                title="Xóa ảnh để chèn ảnh khác" 
+                aria-label="Xóa ảnh" 
+                onClick={clearImage} 
+                disabled={reading || !!busy}
+              >
+                <X size={18} />
+              </button>
+              {reading && <div className="image-loading"><LoaderCircle className="spin" /> Đang xử lý…</div>}
+            </div>
             <div className="image-file"><FileImage size={14} /><span>{imageName}</span><span>{image ? `${Math.round(image.size / 1024)} KB` : ""}</span></div>
             <div className="image-tip"><ShieldCheck size={15} /><span>Tự quét trên thiết bị. Giữ đủ câu hỏi và mọi lựa chọn trong ảnh xem trước.</span></div>
           </div>}
