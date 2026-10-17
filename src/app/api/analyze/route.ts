@@ -30,8 +30,10 @@ export async function POST(req: NextRequest) {
       if (!meta.width || !meta.height || meta.width < 24 || meta.height < 24) throw new Error("TOO_SMALL");
       normalized = await image.rotate().resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 94 }).toBuffer();
     } catch { throw new AppError("INVALID_IMAGE", "Ảnh hỏng, quá lớn, quá nhỏ hoặc không đúng định dạng. Hãy chọn ảnh JPEG/PNG/WebP rõ hơn.", 415); }
+    const typeHint = form.get("typeHint")?.toString();
+    const validHint = typeHint === "distorted_text" || typeHint === "sentence_choice" ? typeHint : undefined;
     getGeminiConfig();
-    const result = await analyzeImage(normalized, "image/jpeg");
+    const result = await analyzeImage(normalized, "image/jpeg", validHint);
     return json({ ...result, elapsedMs: Math.round(performance.now() - started), source: "gemini" });
   } catch (e) { return errorResponse(e); }
 }
