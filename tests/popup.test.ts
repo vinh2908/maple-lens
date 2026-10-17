@@ -29,6 +29,18 @@ for (const type of ["distorted_text", "sentence_choice"] as const) {
     assert.ok(found!.bounds.width < 300);
   });
 }
+test("locates distorted_text popup with lime-green captcha box", () => {
+  const { pixels, width, height } = scene("distorted_text");
+  // Replace magenta box with lime-green box
+  for (let row = 250; row < 310; row++) for (let col = 220; col < 420; col++) {
+    const at = (row * width + col) * 4;
+    pixels.set([128, 198, 45, 255], at);
+  }
+  const found = detectPopupPixels(pixels, width, height);
+  assert.equal(found?.typeHint, "distorted_text");
+  assert.equal(found?.alreadyFramed, false);
+  assert.ok(found!.bounds.x <= 200 && found!.bounds.y <= 70);
+});
 test("does not crop a plain photo, plain blue background or an invalid pixel buffer", () => {
   const { pixels, width, height } = scene("distorted_text");
   for (let at = 0; at < pixels.length; at += 4) pixels.set([37, 83, 146, 255], at);

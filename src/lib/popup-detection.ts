@@ -23,25 +23,28 @@ function components(mask: Uint8Array, width: number, height: number, minArea: nu
 }
 
 function layout(data: Uint8ClampedArray, width: number, region: PopupBounds): { type: PopupType; hasText: boolean } {
-  const rowStart = Math.round(region.y + region.height * .12); const rowEnd = Math.round(region.y + region.height * .96);
-  const x1 = Math.round(region.x + region.width * .1); const x2 = Math.round(region.x + region.width * .9);
-  let lightRuns = 0; let inLight = false; let magentaRows = 0; let textRows = 0;
+  const rowStart = Math.round(region.y + region.height * .10); const rowEnd = Math.round(region.y + region.height * .96);
+  const x1 = Math.round(region.x + region.width * .08); const x2 = Math.round(region.x + region.width * .92);
+  let lightRuns = 0; let inLight = false; let captchaRows = 0; let textRows = 0;
   for (let y = rowStart; y < rowEnd; y++) {
-    let light = 0; let magenta = 0; let contrast = 0;
+    let light = 0; let captcha = 0; let contrast = 0;
     for (let x = x1; x < x2; x++) {
       const i = (y * width + x) * 4; const r = data[i]; const g = data[i + 1]; const b = data[i + 2];
       if (r > 135 && g > 145 && b > 150 && Math.max(r, g, b) - Math.min(r, g, b) < 100) light++;
-      if (r > 95 && b > 75 && r > g * 1.35 && b > g * 1.25) magenta++;
-      if (r > 160 && g > 160 && b > 160) contrast++;
+      const isLimeGreen = g > 120 && g > b * 1.25 && (g > r * 1.05 || (r > 80 && b < 120));
+      const isMagenta = r > 95 && b > 75 && r > g * 1.35 && b > g * 1.25;
+      if (isLimeGreen || isMagenta) captcha++;
+      if (r > 145 && g > 145 && b > 145) contrast++;
+      if (r > 140 && g > 120 && b < 100) contrast++;
     }
     const span = Math.max(1, x2 - x1); const bar = light / span > .58;
     if (bar && !inLight) lightRuns++; inLight = bar;
-    if (magenta / span > .22) magentaRows++;
-    if (contrast / span > .015) textRows++;
+    if (captcha / span > .12) captchaRows++;
+    if (contrast / span > .01) textRows++;
   }
-  if (magentaRows > Math.max(3, region.height * .035)) return { type: "distorted_text", hasText: true };
+  if (captchaRows > Math.max(2, region.height * .025)) return { type: "distorted_text", hasText: true };
   if (lightRuns >= 3) return { type: "sentence_choice", hasText: true };
-  return { type: "unknown", hasText: textRows > region.height * .025 };
+  return { type: "unknown", hasText: textRows > region.height * .015 };
 }
 
 // Conservative image-layout detector, not OCR. It never guesses Korean characters.
@@ -51,7 +54,7 @@ export function detectPopupPixels(data: Uint8ClampedArray, width: number, height
   const blue = new Uint8Array(width * height); const light = new Uint8Array(width * height);
   for (let p = 0; p < blue.length; p++) {
     const i = p * 4; const r = data[i]; const g = data[i + 1]; const b = data[i + 2];
-    blue[p] = Number(b > 65 && b > r * 1.25 && b > g * 1.12 && r < 170);
+    blue[p] = Number(b > 60 && b > r * 1.18 && b > g * 1.08 && r < 180);
     light[p] = Number(Math.min(r, g, b) > 140 && Math.max(r, g, b) - Math.min(r, g, b) < 95);
   }
   const minimum = Math.max(180, Math.round(width * height * .006));
@@ -60,10 +63,10 @@ export function detectPopupPixels(data: Uint8ClampedArray, width: number, height
     for (const region of components(mask, width, height, minimum)) {
       const ratio = region.width / region.height; const area = region.width * region.height;
       const fraction = area / (width * height); const fill = region.count / area;
-      if (region.width < 55 || region.height < 55 || ratio < .45 || ratio > 3.1 || fraction < .012) continue;
-      if (kind === "blue" && fill < .35 || kind === "light" && fill < .68) continue;
+      if (region.width < 50 || region.height < 50 || ratio < .45 || ratio > 3.1 || fraction < .012) continue;
+      if (kind === "blue" && fill < .30 || kind === "light" && fill < .68) continue;
       const hint = layout(data, width, region);
-      if (kind === "blue" && (!hint.hasText || hint.type === "unknown" && fraction < .65)) continue;
+      if (kind === "blue" && (!hint.hasText || (hint.type === "unknown" && fraction < .04))) continue;
       if (kind === "light") {
         let dark = 0; let total = 0;
         for (let y = region.y + 2; y < region.y + region.height - 2; y += 2) for (let x = region.x + 2; x < region.x + region.width - 2; x += 2) {

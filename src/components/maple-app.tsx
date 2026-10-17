@@ -13,7 +13,7 @@ type Notice = { kind: "error" | "success" | "info"; text: string };
 const typeLabels = { distorted_text: "Dạng 1 · Chữ biến dạng", sentence_choice: "Dạng 2 · Chọn câu", unknown: "Chưa xác định loại" };
 const PREVIEW_ONLY = process.env.NEXT_PUBLIC_PREVIEW_ONLY === "true";
 
-async function request<T>(path: string, init?: RequestInit, timeout = 15_000, abortSignal?: AbortSignal): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, timeout = 25_000, abortSignal?: AbortSignal): Promise<T> {
   if (PREVIEW_ONLY) {
     if (path === "/api/status") return { configured: false, model: "demo", authenticated: true, authRequired: false, authUnavailable: false } as T;
     throw new Error("Đây là demo giao diện chưa kết nối Gemini. Bạn có thể chọn ảnh, cắt/xoay và xem kết quả minh họa. Phân tích thật cần chạy mã nguồn với API key riêng trên máy chủ.");
@@ -29,7 +29,7 @@ async function request<T>(path: string, init?: RequestInit, timeout = 15_000, ab
     return data;
   } catch (e) {
     if ((e as Error).name === "AbortError" && abortSignal?.aborted) throw e;
-    if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") throw new Error("Quá thời gian chờ (15s). Hãy thử lại hoặc chọn ảnh rõ hơn.");
+    if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") throw new Error("Quá thời gian chờ (25s). Hãy thử lại hoặc chọn ảnh rõ hơn.");
     if (e instanceof TypeError) throw new Error("Không kết nối được máy chủ. Kiểm tra mạng và thử lại.");
     throw e;
   }
@@ -223,7 +223,7 @@ export default function MapleApp() {
         body.append("typeHint", autoInfo.typeHint);
       }
       const tNetworkStart = performance.now();
-      const data = await request<AnalysisResult>("/api/analyze", { method: "POST", body }, 15_000, controller.signal);
+      const data = await request<AnalysisResult>("/api/analyze", { method: "POST", body }, 25_000, controller.signal);
       const networkMs = Math.round(performance.now() - tNetworkStart);
       const actionToAnswerMs = Math.round(performance.now() - tActionStart);
       const totalFromInputMs = inputTimestamp.current ? Math.round(performance.now() - inputTimestamp.current) : actionToAnswerMs;
@@ -381,7 +381,7 @@ export default function MapleApp() {
 
         <section ref={resultRef} className={`panel result-panel ${result ? "has-result" : ""}`} aria-labelledby="result-title" aria-live="polite" aria-busy={busy === "analyze"}>
           <div className="panel-heading"><div className="panel-title"><span className="step-number muted">02</span><h2 id="result-title">Kết quả phân tích</h2></div><span className="ai-tag"><Sparkles size={12} /> GEMINI</span></div>
-          {busy === "analyze" ? <div className="result-empty"><div className="result-orb processing"><ScanLine size={29} /></div><h3>Đang đọc từng nét chữ…</h3><p>Gemini đang xem ảnh của bạn.<br />Kết quả thường cần một chút thời gian.</p><span className="elapsed"><Clock3 size={14} /> {elapsed} giây · Có thể chờ tối đa 15 giây</span></div> : result ? <div className="result-body">
+          {busy === "analyze" ? <div className="result-empty"><div className="result-orb processing"><ScanLine size={29} /></div><h3>Đang đọc từng nét chữ…</h3><p>Gemini đang xem ảnh của bạn.<br />Kết quả thường cần một chút thời gian.</p><span className="elapsed"><Clock3 size={14} /> {elapsed} giây · Có thể chờ tối đa 25 giây</span></div> : result ? <div className="result-body">
             {result.source === "demo" && <div className="demo-banner"><Sparkles size={15} /><span>KẾT QUẢ MINH HỌA · VIẾT SẴN<br /><small>Không gọi Gemini, không dùng để trả lời ảnh khác.</small></span></div>}
             
             {result.timings && (
