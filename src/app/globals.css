@@ -17,7 +17,7 @@
 .image-toolbar .delete-image-btn{color:#fca5a5;border-color:rgba(239,68,68,0.3)}
 .image-toolbar .delete-image-btn:hover{background:rgba(239,68,68,0.15);color:#f87171;border-color:#f87171}
 
-/* Persistent side-by-side layout for PC window resizing */
+/* Bố cục 2 cột cố định song song trên mọi kích cỡ màn hình PC/Laptop */
 @media (min-width: 440px) {
   .workspace {
     display: grid !important;
