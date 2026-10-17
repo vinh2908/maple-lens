@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     if (file.size > MAX_UPLOAD_BYTES) throw new AppError("FILE_TOO_LARGE", "Ảnh gửi lên không được vượt quá 4 MB.", 413);
     if (!ACCEPTED_TYPES.includes(file.type)) throw new AppError("INVALID_IMAGE_TYPE", "Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP.", 415);
     const bytes = Buffer.from(await file.arrayBuffer());
+    const tPrepStart = performance.now();
     let normalized: Buffer;
     try {
       const image = sharp(bytes, { limitInputPixels: 24_000_000, animated: false, failOn: "error" });
@@ -28,10 +29,14 @@ export async function POST(req: NextRequest) {
       const formatType = { jpeg: "image/jpeg", png: "image/png", webp: "image/webp" }[meta.format as "jpeg" | "png" | "webp"];
       if (formatType !== file.type || (meta.pages ?? 1) > 1) throw new Error("INVALID_FORMAT");
       if (!meta.width || !meta.height || meta.width < 24 || meta.height < 24) throw new Error("TOO_SMALL");
-      normalized = await image.rotate().resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 94 }).toBuffer();
+      normalized = await image.rotate().resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
     } catch { throw new AppError("INVALID_IMAGE", "Ảnh hỏng, quá lớn, quá nhỏ hoặc không đúng định dạng. Hãy chọn ảnh JPEG/PNG/WebP rõ hơn.", 415); }
+    const imagePrepMs = Math.round(performance.now() - tPrepStart);
+    const typeHint = form.get("typeHint")?.toString();
+    const validHint = typeHint === "distorted_text" || typeHint === "sentence_choice" ? typeHint : undefined;
     getGeminiConfig();
-    const result = await analyzeImage(normalized, "image/jpeg");
-    return json({ ...result, elapsedMs: Math.round(performance.now() - started), source: "gemini" });
+    const result = await analyzeImage(normalized, "image/jpeg", validHint);
+    const serverMs = Math.round(performance.now() - started);
+    return json({ ...result, serverMs, imagePrepMs, elapsedMs: serverMs, source: "gemini" });
   } catch (e) { return errorResponse(e); }
 }
