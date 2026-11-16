@@ -3,6 +3,31 @@ export type PopupBounds = { x: number; y: number; width: number; height: number 
 export type PopupDetection = { bounds: PopupBounds; typeHint: PopupType; kind: "blue" | "light"; alreadyFramed: boolean };
 type Region = PopupBounds & { count: number };
 
+// Cards whose option rows span the full card width split the card's own color
+// into thin horizontal strips (each too wide/short to pass the ratio filter),
+// so no candidate survives and a surrounding light background wins instead.
+// Merge vertically stacked, horizontally aligned strips back into one card.
+function mergeStacked(regions: Region[], height: number): Region[] {
+  const maxGap = Math.max(8, Math.round(height * 0.08));
+  const sorted = [...regions].sort((a, b) => a.y - b.y || a.x - b.x);
+  const merged: Region[] = [];
+  for (const region of sorted) {
+    const target = merged.find(m => {
+      const overlap = Math.min(m.x + m.width, region.x + region.width) - Math.max(m.x, region.x);
+      const gap = region.y - (m.y + m.height);
+      return overlap >= Math.min(m.width, region.width) * 0.6 && gap <= maxGap;
+    });
+    if (!target) { merged.push({ ...region }); continue; }
+    const x = Math.min(target.x, region.x);
+    const y = Math.min(target.y, region.y);
+    const right = Math.max(target.x + target.width, region.x + region.width);
+    const bottom = Math.max(target.y + target.height, region.y + region.height);
+    target.x = x; target.y = y; target.width = right - x; target.height = bottom - y;
+    target.count += region.count;
+  }
+  return merged;
+}
+
 function components(mask: Uint8Array, width: number, height: number, minArea: number): Region[] {
   const seen = new Uint8Array(mask.length); const queue = new Int32Array(mask.length); const regions: Region[] = [];
   for (let seed = 0; seed < mask.length; seed++) {
@@ -127,7 +152,7 @@ export function detectPopupPixels(data: Uint8ClampedArray, width: number, height
   const candidates: (PopupDetection & { score: number })[] = [];
 
   for (const [kind, mask] of masks) {
-    for (const region of components(mask, width, height, minimum)) {
+    for (const region of mergeStacked(components(mask, width, height, minimum), height)) {
       const ratio = region.width / region.height;
       const area = region.width * region.height;
       const fraction = area / totalPixels;
