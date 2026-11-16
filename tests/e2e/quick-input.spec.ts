@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
-import sharp from "sharp";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { demoResult } from "../../src/lib/demo";
 
 const choice = { ...demoResult, analysis: { ...demoResult.analysis,
@@ -9,7 +10,7 @@ const choice = { ...demoResult, analysis: { ...demoResult.analysis,
 }};
 
 async function paste(page: import("@playwright/test").Page, valid = true) {
-  const buffer = valid ? await sharp({ create: { width: 900, height: 600, channels: 3, background: "#304238" } }).png().toBuffer() : Buffer.from("invalid image");
+  const buffer = valid ? readFileSync(path.join(__dirname, "..", "fixtures", "paste-900x600.png")) : Buffer.from("invalid image");
   await page.locator(".image-panel").evaluate((panel, encoded) => {
     const bytes = Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
     const clipboard = new DataTransfer();

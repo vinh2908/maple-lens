@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
-import sharp from "sharp";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { demoResult } from "../../src/lib/demo";
 
 test("mobile layout, example image, crop, rotate and explicit demo result", async ({ page }) => {
@@ -30,7 +31,7 @@ test("mobile layout, example image, crop, rotate and explicit demo result", asyn
 test("library upload handles the server missing-key response fixture without inventing an answer", async ({ page }) => {
   await page.route("**/api/analyze", route => route.fulfill({ status: 503, json: { error: { code: "MISSING_KEY", message: "Chưa cấu hình Gemini API key trên máy chủ." } } }));
   await page.goto("/");
-  const image = await sharp({ create: { width: 700, height: 400, channels: 3, background: "#394f4d" } }).jpeg().toBuffer();
+  const image = readFileSync(path.join(__dirname, "..", "fixtures", "upload-700x400.jpg"));
   await page.getByLabel("Chọn ảnh thử thách", { exact: true }).setInputFiles({ name: "challenge.jpg", mimeType: "image/jpeg", buffer: image });
   await expect(page.getByRole("img", { name: "Ảnh thử thách đã chọn để xem trước" })).toBeVisible();
   await page.getByRole("button", { name: "Phân tích ảnh", exact: true }).click();
@@ -103,9 +104,7 @@ test("backend validates image content, format, body and rejects cross-origin req
 test("automatically finds a blue popup, preserves all choices and restores original without any API call", async ({ page }) => {
   let calls = 0;
   await page.route("**/api/analyze", () => { calls++; });
-  const rows = Array.from({ length: 5 }, (_, i) => `<rect x="300" y="205" width="255" height="27" fill="#becada" transform="translate(0 ${i * 55})"/>`).join("");
-  const scene = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="650"><rect width="900" height="650" fill="#253025"/><rect x="275" y="100" width="305" height="455" fill="#255392"/>${rows}</svg>`;
-  const buffer = await sharp(Buffer.from(scene)).png().toBuffer();
+  const buffer = readFileSync(path.join(__dirname, "..", "fixtures", "scene-900x650.png"));
   await page.goto("/");
   await page.getByLabel("Chọn ảnh thử thách", { exact: true }).setInputFiles({ name: "full-screen.png", mimeType: "image/png", buffer });
   const status = page.locator(".popup-status");

@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import sharp from "sharp";
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { handleRegional } from "../src/lib/regional-handler";
+import { inspectImageHeader } from "../src/lib/image-header";
 import { relayConfig, regionalAnalyze, regionalConnection, regionalHealth } from "../src/lib/regional-client";
 import { MAX_UPLOAD_BYTES } from "../src/lib/contracts";
 import { demoResult } from "../src/lib/demo";
@@ -23,7 +24,7 @@ function mocks() {
     async analyze(_config: unknown, data: string, type: string) {
       calls.analyze++;
       assert.equal(type, "image/jpeg");
-      assert.equal((await sharp(Buffer.from(data, "base64")).metadata()).format, "jpeg");
+      assert.equal(inspectImageHeader(Buffer.from(data, "base64")).format, "image/jpeg");
       return { analysis: demoResult.analysis, model: env.GEMINI_MODEL, geminiMs: 42 };
     },
   } };
@@ -63,7 +64,7 @@ test("text test calls configured model once; missing key and bad actions never c
 
 test("JPEG is validated/decoded before Gemini; false MIME, corruption and oversized streams fail", async () => {
   const m = mocks();
-  const jpeg = await sharp({ create: { width: 64, height: 64, channels: 3, background: "white" } }).jpeg().toBuffer();
+  const jpeg = readFileSync(new URL("./fixtures/regional-64x64.jpg", import.meta.url));
   const r = await handleRegional(req("analyze", { headers: { "content-type": "image/jpeg" }, body: jpeg }), env, m.services);
   assert.equal(r.status, 200);
   assert.equal((await r.json()).source, "gemini");
