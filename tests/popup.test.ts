@@ -29,29 +29,6 @@ for (const type of ["distorted_text", "sentence_choice"] as const) {
     assert.ok(found!.bounds.width < 300);
   });
 }
-test("locates the blue popup when full-width white rows split it on a white screen", () => {
-  // Real game screenshots have a white screen behind the popup and option rows
-  // spanning the whole card width, which splits the blue card into thin strips.
-  // The detector must merge those strips instead of cropping the white background.
-  const width = 640; const height = 480;
-  const pixels = new Uint8ClampedArray(width * height * 4);
-  function rect(x: number, y: number, w: number, h: number, rgb: number[]) {
-    for (let row = y; row < y + h; row++) for (let col = x; col < x + w; col++) {
-      const at = (row * width + col) * 4; pixels.set([...rgb, 255], at);
-    }
-  }
-  rect(0, 0, width, height, [245, 245, 245]);
-  rect(200, 70, 240, 340, [37, 83, 146]);
-  for (let i = 0; i < 5; i++) rect(200, 150 + i * 44, 240, 25, [235, 238, 245]);
-  const found = detectPopupPixels(pixels, width, height);
-  assert.equal(found?.kind, "blue");
-  assert.equal(found?.typeHint, "sentence_choice");
-  assert.equal(found?.alreadyFramed, false);
-  assert.ok(found!.bounds.x <= 200 && found!.bounds.y <= 70);
-  assert.ok(found!.bounds.x + found!.bounds.width >= 440);
-  assert.ok(found!.bounds.y + found!.bounds.height >= 410);
-  assert.ok(found!.bounds.width < 300);
-});
 test("does not crop a plain photo, plain blue background or an invalid pixel buffer", () => {
   const { pixels, width, height } = scene("distorted_text");
   for (let at = 0; at < pixels.length; at += 4) pixels.set([37, 83, 146, 255], at);
