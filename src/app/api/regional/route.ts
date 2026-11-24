@@ -1,7 +1,7 @@
 import { handleRegional } from "@/lib/regional-handler";
 
 export const runtime = "nodejs";
-// Function placement is configured in vercel.json (sin1).
+// Function placement is configured in vercel.json (iad1).
 export const maxDuration = 45;
 function handle(request: Request) {
   return handleRegional(request, {
