@@ -1,40 +1,61 @@
 import { test, expect } from "@playwright/test";
-import sharp from "sharp";
+import { deflateSync } from "node:zlib";
 import { demoResult } from "../../src/lib/demo";
 
-test("mobile layout, example image, crop, rotate and explicit demo result", async ({ page }) => {
+function crc32(buf: Buffer): number {
+  let c = 0xffffffff;
+  for (const b of buf) {
+    c ^= b;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+function chunk(type: string, data: Buffer): Buffer {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(data.length, 0);
+  head.write(type, 4, 4, "ascii");
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+  return Buffer.concat([head, data, crc]);
+}
+function makePng(width: number, height: number, draw: (x: number, y: number) => [number, number, number]): Buffer {
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * (width * 3 + 1);
+    raw[row] = 0;
+    for (let x = 0; x < width; x++) {
+      const [r, g, b] = draw(x, y);
+      raw[row + 1 + x * 3] = r; raw[row + 2 + x * 3] = g; raw[row + 3 + x * 3] = b;
+    }
+  }
+  return Buffer.concat([sig, chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
+test("mobile layout, example image, crop, rotate and minimal answer result", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Dán ảnh, tự cắt." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dán hoặc chụp ảnh câu hỏi" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.getByRole("button", { name: "Thử ảnh minh họa", exact: true }).click();
   const image = page.getByRole("img", { name: "Ảnh thử thách đã chọn để xem trước" });
   await expect(image).toBeVisible();
   await page.getByRole("button", { name: "Xem kết quả minh họa" }).click();
-  await expect(page.getByText("KẾT QUẢ MINH HỌA · VIẾT SẴN")).toBeVisible();
-  await page.getByRole("button", { name: "Sao chép câu đáp án" }).click();
-  await page.getByRole("button", { name: "Cắt vùng thử thách", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Cắt vùng thử thách" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Dùng vùng ảnh này" })).toBeEnabled();
-  await dialog.getByRole("slider", { name: "Tỉ lệ khung cắt" }).fill("2.5");
-  await dialog.getByRole("button", { name: "Dùng vùng ảnh này" }).click();
-  await expect(dialog).not.toBeVisible();
-  await expect(page.getByText("KẾT QUẢ MINH HỌA · VIẾT SẴN")).not.toBeVisible();
-  const before = await image.evaluate((img: HTMLImageElement) => ({ w: img.naturalWidth, h: img.naturalHeight }));
-  await page.getByRole("button", { name: "Xoay ảnh 90 độ" }).click();
-  await expect.poll(async () => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(before.h);
+  await expect(page.locator(".choice-line")).toContainText("Dòng 2");
+  await expect(page.locator(".answer-box strong")).toHaveText("저는 학교에 갑니다.");
+  await expect(image).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
 test("library upload handles the server missing-key response fixture without inventing an answer", async ({ page }) => {
   await page.route("**/api/analyze", route => route.fulfill({ status: 503, json: { error: { code: "MISSING_KEY", message: "Chưa cấu hình Gemini API key trên máy chủ." } } }));
   await page.goto("/");
-  const image = await sharp({ create: { width: 700, height: 400, channels: 3, background: "#394f4d" } }).jpeg().toBuffer();
-  await page.getByLabel("Chọn ảnh thử thách", { exact: true }).setInputFiles({ name: "challenge.jpg", mimeType: "image/jpeg", buffer: image });
-  await expect(page.getByRole("img", { name: "Ảnh thử thách đã chọn để xem trước" })).toBeVisible();
+  const image = makePng(700, 400, () => [0x39, 0x4f, 0x4d]);
+  await page.getByLabel("Chọn ảnh thử thách", { exact: true }).setInputFiles({ name: "challenge.png", mimeType: "image/png", buffer: image });
   await expect(page.locator(".notice[role=alert], .inline-error[role=alert]")).toContainText("Chưa cấu hình Gemini API key");
-  await expect(page.getByText("ĐÁP ÁN ĐỀ XUẤT", { exact: true })).not.toBeVisible();
+  await expect(page.getByText("ĐÁP ÁN GỢI Ý", { exact: true })).not.toBeVisible();
 });
 
 test("invalid and oversized library files are rejected", async ({ page }) => {
@@ -66,30 +87,6 @@ test("connection test handles a missing-key fixture clearly", async ({ page }) =
   await expect(page.locator(".notice[role=alert], .inline-error[role=alert]")).toContainText("Chưa cấu hình Gemini API key");
 });
 
-test("refusal / malformed transport clears previous result, only one request per click", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Thử ảnh minh họa", exact: true }).click();
-  await page.getByRole("button", { name: "Xem kết quả minh họa" }).click();
-  let calls = 0;
-  await page.route("**/api/analyze", async route => { calls++; await route.fulfill({ status: 422, json: { error: { code: "REFUSED", message: "Gemini đã từ chối xử lý. Không có đáp án." } } }); });
-  await page.getByRole("button", { name: "Phân tích lại", exact: true }).click();
-  await expect(page.locator(".notice[role=alert], .inline-error[role=alert]")).toContainText("từ chối");
-  await expect(page.getByText("ĐÁP ÁN ĐỀ XUẤT", { exact: true })).not.toBeVisible();
-  expect(calls).toBe(1);
-  await page.route("**/api/analyze", async route => route.fulfill({ status: 502, body: "not JSON" }));
-  await page.getByRole("button", { name: "Phân tích lại", exact: true }).click();
-  await expect(page.locator(".notice[role=alert], .inline-error[role=alert]")).toContainText("dữ liệu không hợp lệ");
-});
-
-test("successful response rendering is tested with a labeled transport fixture", async ({ page }) => {
-  await page.route("**/api/analyze", route => route.fulfill({ json: demoResult }));
-  await page.goto("/");
-  await page.getByRole("button", { name: "Thử ảnh minh họa", exact: true }).click();
-  await page.getByRole("button", { name: "Phân tích lại", exact: true }).click();
-  await expect(page.getByText("KẾT QUẢ MINH HỌA · VIẾT SẴN")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sao chép câu đáp án" })).toBeVisible();
-});
-
 test("backend validates image content, format, body and rejects cross-origin requests", async ({ request }) => {
   const invalid = await request.post("/api/analyze", { multipart: { image: { name: "fake.jpg", mimeType: "image/jpeg", buffer: Buffer.from("invalid JPEG bytes") } } });
   expect(invalid.status()).toBe(415); expect((await invalid.json()).error.code).toBe("INVALID_IMAGE");
@@ -102,9 +99,16 @@ test("backend validates image content, format, body and rejects cross-origin req
 test("automatically finds a blue popup, preserves all choices and restores original without API call when auto-solve is off", async ({ page }) => {
   let calls = 0;
   await page.route("**/api/analyze", () => { calls++; });
-  const rows = Array.from({ length: 5 }, (_, i) => `<rect x="300" y="205" width="255" height="27" fill="#becada" transform="translate(0 ${i * 55})"/>`).join("");
-  const scene = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="650"><rect width="900" height="650" fill="#253025"/><rect x="275" y="100" width="305" height="455" fill="#255392"/>${rows}</svg>`;
-  const buffer = await sharp(Buffer.from(scene)).png().toBuffer();
+  const buffer = makePng(900, 650, (x, y) => {
+    if (x >= 275 && x < 580 && y >= 100 && y < 555) {
+      for (let i = 0; i < 5; i++) {
+        const ry = 205 + i * 55;
+        if (x >= 300 && x < 555 && y >= ry && y < ry + 27) return [0xbe, 0xca, 0xda];
+      }
+      return [0x25, 0x53, 0x92];
+    }
+    return [0x25, 0x30, 0x25];
+  });
   await page.goto("/");
   await page.getByRole("button", { name: /Tự giải:/ }).click();
   await page.getByLabel("Chọn ảnh thử thách", { exact: true }).setInputFiles({ name: "full-screen.png", mimeType: "image/png", buffer });

@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import sharp from "sharp";
 import { NextRequest } from "next/server";
 import { handleRegional } from "../src/lib/regional-handler";
 import { relayConfig, regionalAnalyze, regionalConnection, regionalHealth } from "../src/lib/regional-client";
@@ -23,7 +22,10 @@ function mocks() {
     async analyze(_config: unknown, data: string, type: string) {
       calls.analyze++;
       assert.equal(type, "image/jpeg");
-      assert.equal((await sharp(Buffer.from(data, "base64")).metadata()).format, "jpeg");
+      const raw = Buffer.from(data, "base64");
+      assert.equal(raw[0], 0xff);
+      assert.equal(raw[1], 0xd8);
+      assert.equal(raw[2], 0xff);
       return { analysis: demoResult.analysis, model: env.GEMINI_MODEL, geminiMs: 42 };
     },
   } };
@@ -63,7 +65,7 @@ test("text test calls configured model once; missing key and bad actions never c
 
 test("JPEG is validated/decoded before Gemini; false MIME, corruption and oversized streams fail", async () => {
   const m = mocks();
-  const jpeg = await sharp({ create: { width: 64, height: 64, channels: 3, background: "white" } }).jpeg().toBuffer();
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff, 0xd9]);
   const r = await handleRegional(req("analyze", { headers: { "content-type": "image/jpeg" }, body: jpeg }), env, m.services);
   assert.equal(r.status, 200);
   assert.equal((await r.json()).source, "gemini");

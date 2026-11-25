@@ -23,6 +23,44 @@
 .timing-stages b{color:#cbd5e1;font-weight:600}
 .text-button.auto-on{color:#34d399;font-weight:600}
 .choice-line{color:#e6ffef;font-size:34px;font-weight:750;margin:8px 0 14px;letter-spacing:-.5px}
+.admin-shell{max-width:1184px;margin:0 auto;padding:24px 20px 60px}
+.admin-shell.lock-center{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px}
+.lock-card{width:430px;max-width:100%}
+.lock-form{padding:20px}
+.admin-header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px;margin-bottom:20px}
+.admin-header h1{font-size:24px;margin-top:4px;font-weight:650}
+.admin-top-actions{display:flex;flex-wrap:wrap;gap:10px}
+.remember-active{border-color:#10b98166 !important;background:#10b98118 !important;color:#34d399 !important}
+.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:22px}
+.admin-domain-card.domain-locked{border-color:#ef444466}
+.domain-badge{font-size:10px;font-weight:650;padding:4px 8px;border-radius:5px;border:1px solid #2e4a3d;background:#163026;color:#6ee7b7}
+.domain-badge.locked{border-color:#7f1d1d;background:#3a191c;color:#fca5a5}
+.admin-card-body{padding:16px 20px 20px}
+.admin-meta-row{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted);margin-bottom:14px}
+.admin-meta-row b{color:var(--text);font-weight:550}
+.admin-counters{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.admin-counters>div{background:#0e1520;border:1px solid #253041;border-radius:8px;padding:12px}
+.admin-counters span{display:block;font-size:10px;color:var(--muted);margin-bottom:4px}
+.admin-counters strong{font-size:24px;color:var(--orange)}
+.admin-card-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.admin-card-actions button{min-height:40px;font-size:12px;padding:8px 10px}
+.lock-btn{border-color:#7f1d1d !important;color:#fca5a5}
+.unlock-btn{border-color:#2e5a44 !important;color:#6ee7b7}
+.pw-change-form{display:flex;flex-direction:column;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.pw-change-form .password-input{min-height:40px;padding:9px 12px;font-size:13px}
+.domain-auth-box{background:#1c1614;border:1px solid #593b2e;border-radius:8px;padding:12px;margin-bottom:12px;font-size:11px;color:#e6bfa6}
+.domain-auth-row{display:flex;gap:8px;margin-top:8px}
+.domain-auth-row .password-input{min-height:38px;padding:8px 10px;font-size:13px}
+.admin-history-panel{margin-top:10px}
+.admin-filter{background:#0e1520;color:var(--text);border:1px solid #303a4a;border-radius:6px;padding:6px 10px;font-size:11px}
+.admin-table-wrap{overflow-x:auto}
+.admin-table{width:100%;border-collapse:collapse;font-size:12px}
+.admin-table th,.admin-table td{padding:10px 16px;text-align:left;border-bottom:1px solid #1e2633}
+.admin-table th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;background:#0e1520}
+.log-status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600}
+.log-status.ok{background:#123528;color:#6ee7b7}
+.log-status.fail{background:#3a191c;color:#fca5a5}
+.empty-cell{text-align:center !important;color:var(--muted);padding:24px !important}
 
 /* Khóa cố định bố cục 2 cột cho PC / Laptop: từ 440px trở lên */
 @media (min-width: 440px) {

@@ -57,7 +57,15 @@ export type AnalysisResult = {
   timings?: TimingBreakdown;
 };
 export type ApiErrorBody = { error: { code: string; message: string; retryAfter?: number } };
-export type ServerStatus = { configured: boolean; model: string; authenticated: boolean; authRequired: boolean; authUnavailable: boolean };
+export type ServerStatus = {
+  configured: boolean;
+  model: string;
+  authenticated: boolean;
+  authRequired: boolean;
+  authUnavailable: boolean;
+  locked?: boolean;
+  domain?: string;
+};
 
 export function validateAnalysis(raw: unknown): Analysis {
   const result = analysisSchema.parse(raw);

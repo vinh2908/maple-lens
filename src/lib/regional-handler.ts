@@ -1,9 +1,9 @@
 // Server route only: never import this module from a client component.
 import { timingSafeEqual } from "node:crypto";
-import sharp from "sharp";
 import { AppError, providerError } from "./api-errors";
 import { MAX_UPLOAD_BYTES } from "./contracts";
 import { analyzeWithGemini, testWithGemini } from "./gemini-core";
+import { assertValidImageHeader } from "./image-header";
 import { limitApi } from "./rate-limit";
 
 type RegionalEnv = {
@@ -47,8 +47,6 @@ export async function handleRegional(request: Request, env: RegionalEnv, api = s
     const action = new URL(request.url).searchParams.get("action");
     if (action !== "connection" && action !== "analyze") throw new AppError("INVALID_BODY", "Thao tác backend không hợp lệ.");
     if (!configured) throw new AppError("MISSING_KEY", "Backend Vercel chưa được cấu hình Gemini API key.", 503);
-    // Additional per-process protection. The private Sites gateway enforces the
-    // durable, shared daily/minute counters BEFORE forwarding any POST here.
     api.limit();
     const gemini = { apiKey: env.GEMINI_API_KEY!, model };
     if (action === "connection") {
@@ -57,14 +55,8 @@ export async function handleRegional(request: Request, env: RegionalEnv, api = s
     }
     if (request.headers.get("content-type") !== "image/jpeg") throw new AppError("INVALID_IMAGE_TYPE", "Backend chỉ nhận ảnh JPEG đã chuẩn hóa.", 415);
     const bytes = await imageBody(request);
-    let normalized: Buffer;
-    try {
-      const image = sharp(bytes, { limitInputPixels: 24_000_000, animated: false });
-      const meta = await image.metadata();
-      if (meta.format !== "jpeg" || !meta.width || !meta.height || meta.width < 24 || meta.height < 24 || (meta.pages ?? 1) > 1) throw new Error("Invalid JPEG");
-      normalized = await image.rotate().resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 94 }).toBuffer();
-    } catch { throw new AppError("INVALID_IMAGE", "Không đọc được ảnh JPEG. Hãy chọn ảnh rõ hơn hoặc chụp lại.", 415); }
-    const result = await api.analyze(gemini, normalized.toString("base64"), "image/jpeg");
+    assertValidImageHeader(bytes, "image/jpeg");
+    const result = await api.analyze(gemini, bytes.toString("base64"), "image/jpeg");
     return json({ ...result, source: "gemini", elapsedMs: Math.round(performance.now() - started) });
   } catch (error) {
     const e = providerError(error);

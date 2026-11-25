@@ -22,7 +22,6 @@
     "react-dom": "latest",
     "react-easy-crop": "latest",
     "server-only": "latest",
-    "sharp": "latest",
     "zod": "^4.0.0"
   },
   "devDependencies": {

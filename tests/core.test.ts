@@ -1,11 +1,49 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validateAnalysis, type Analysis } from "../src/lib/contracts";
-import { providerError, providerDiagnostic } from "../src/lib/api-errors";
+import { providerError, providerDiagnostic, AppError } from "../src/lib/api-errors";
 import { consumeLimit } from "../src/lib/rate-limit";
 import { demoResult } from "../src/lib/demo";
 import { validateConnectionResponse } from "../src/lib/gemini-core";
+import { assertValidImageHeader } from "../src/lib/image-header";
+import {
+  getAuthSigningSecret,
+  hashPassword,
+  verifyHash,
+  verifyPasswordAgainstState,
+} from "../src/lib/kv";
 import type { GenerateContentResponse } from "@google/genai";
+
+test("validates pure TS magic-bytes headers for JPEG, PNG, WebP and rejects mismatches", () => {
+  const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00]);
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+  const webp = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
+
+  assert.doesNotThrow(() => assertValidImageHeader(jpeg, "image/jpeg"));
+  assert.doesNotThrow(() => assertValidImageHeader(png, "image/png"));
+  assert.doesNotThrow(() => assertValidImageHeader(webp, "image/webp"));
+
+  assert.throws(() => assertValidImageHeader(png, "image/jpeg"), (e: unknown) => e instanceof AppError && e.code === "INVALID_IMAGE" && e.status === 415);
+  assert.throws(() => assertValidImageHeader(jpeg, "image/png"), (e: unknown) => e instanceof AppError && e.code === "INVALID_IMAGE" && e.status === 415);
+  assert.throws(() => assertValidImageHeader(Buffer.from("not an image"), "image/webp"), (e: unknown) => e instanceof AppError && e.code === "INVALID_IMAGE" && e.status === 415);
+  assert.throws(() => assertValidImageHeader(Uint8Array.from([0xff, 0xd8]), "image/jpeg"), (e: unknown) => e instanceof AppError && e.code === "INVALID_IMAGE" && e.status === 415);
+});
+
+test("password hashing and signing secret invalidates old tokens on password change", () => {
+  process.env.ADMIN_PASSWORD = "initial-admin-password";
+  const initialState = { pwHash: null, locked: false };
+  assert.equal(verifyPasswordAgainstState("initial-admin-password", initialState), true);
+  assert.equal(verifyPasswordAgainstState("wrong", initialState), false);
+
+  const nextHash = hashPassword("new-domain-password");
+  assert.equal(verifyHash("new-domain-password", nextHash), true);
+  assert.equal(verifyHash("initial-admin-password", nextHash), false);
+
+  const updatedState = { pwHash: nextHash, locked: false };
+  assert.equal(verifyPasswordAgainstState("new-domain-password", updatedState), true);
+  assert.equal(verifyPasswordAgainstState("initial-admin-password", updatedState), false);
+  assert.notEqual(getAuthSigningSecret(initialState), getAuthSigningSecret(updatedState));
+});
 
 test("accepts ultra-compact sentence_choice payload without recognizedText or options", () => {
   const a = validateAnalysis({

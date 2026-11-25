@@ -15,5 +15,5 @@ export function consumeLimit(key: string, limit: number, windowMs: number, now =
 
 export function limitApi() {
   consumeLimit("api-minute", 12, 60_000);
-  consumeLimit("api-day", 100, 86_400_000);
+  consumeLimit("api-day", 500, 86_400_000);
 }
