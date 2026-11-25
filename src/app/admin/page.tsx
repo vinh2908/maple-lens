@@ -43,6 +43,36 @@ function formatTime(ts: number): string {
   }
 }
 
+const ADMIN_REMEMBER_KEY = "maple_admin_remember_v1";
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+function readRememberedAdmin(): Record<string, string> | null {
+  try {
+    const raw = localStorage.getItem(ADMIN_REMEMBER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { expiresAt?: number; passwords?: Record<string, string> };
+    if (!parsed || typeof parsed.expiresAt !== "number" || parsed.expiresAt < Date.now() || !parsed.passwords) {
+      localStorage.removeItem(ADMIN_REMEMBER_KEY);
+      return null;
+    }
+    return parsed.passwords;
+  } catch {
+    return null;
+  }
+}
+
+function writeRememberedAdmin(passwords: Record<string, string>) {
+  try {
+    localStorage.setItem(ADMIN_REMEMBER_KEY, JSON.stringify({ expiresAt: Date.now() + THIRTY_DAYS_MS, passwords }));
+  } catch {}
+}
+
+function clearRememberedAdmin() {
+  try {
+    localStorage.removeItem(ADMIN_REMEMBER_KEY);
+  } catch {}
+}
+
 export default function AdminPage() {
   const [unlocked, setUnlocked] = useState(false);
   const [loginPass, setLoginPass] = useState("");
@@ -64,16 +94,7 @@ export default function AdminPage() {
   const [actionBusy, setActionBusy] = useState<Record<string, boolean>>({});
   const [historyFilter, setHistoryFilter] = useState<string>("all");
 
-  useEffect(() => {
-    void fetch("/api/status", { cache: "no-store" })
-      .then(r => r.json())
-      .then(d => {
-        if (d?.authenticated) setRememberedBrowser(true);
-      })
-      .catch(() => {});
-  }, []);
-
-  const fetchDomainCard = useCallback(async (url: string, passMap: Record<string, string>) => {
+  const fetchDomainCard = useCallback(async (url: string, passMap: Record<string, string>, explicitAttempt = false): Promise<boolean> => {
     const cleanUrl = url.replace(/\/+$/, "");
     setCards(prev => ({
       ...prev,
@@ -126,11 +147,13 @@ export default function AdminPage() {
             configured,
             locked: lockedFromStatus,
             needsAuth: true,
-            error: "Cần nhập mật khẩu hiện tại của miền này.",
+            error: explicitAttempt
+              ? "Mật khẩu vừa nhập chưa đúng cho miền này. Vui lòng thử lại."
+              : "Mật khẩu miền này khác với miền chính. Nhập mật khẩu hiện tại của miền này.",
             stats: null,
           },
         }));
-        return;
+        return false;
       }
       if (!statsRes.ok) {
         const err = await statsRes.json().catch(() => null);
@@ -158,6 +181,7 @@ export default function AdminPage() {
           },
         },
       }));
+      return true;
     } catch (e) {
       setCards(prev => ({
         ...prev,
@@ -173,6 +197,7 @@ export default function AdminPage() {
           stats: null,
         },
       }));
+      return false;
     }
   }, []);
 
@@ -182,6 +207,44 @@ export default function AdminPage() {
     },
     [fetchDomainCard]
   );
+
+  useEffect(() => {
+    void fetch("/api/status", { cache: "no-store" })
+      .then(r => r.json())
+      .then(async d => {
+        if (!d?.authenticated) {
+          clearRememberedAdmin();
+          return;
+        }
+        setRememberedBrowser(true);
+        const saved = readRememberedAdmin();
+        if (!saved) return;
+        const origin = window.location.origin;
+        const originPass = saved[origin];
+        if (!originPass) return;
+        const res = await fetch(`${origin}/api/admin/stats`, {
+          headers: { "x-admin-password": originPass },
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          clearRememberedAdmin();
+          return;
+        }
+        const data = await res.json();
+        const list: string[] =
+          Array.isArray(data.domainsList) && data.domainsList.length > 0
+            ? data.domainsList.map((u: string) => u.replace(/\/+$/, ""))
+            : [origin];
+        if (!list.includes(origin)) list.unshift(origin);
+        const merged: Record<string, string> = {};
+        for (const u of list) merged[u] = saved[u] || originPass;
+        setPasswordsByUrl(merged);
+        setDomainUrls(list);
+        setUnlocked(true);
+        await refreshAll(list, merged);
+      })
+      .catch(() => {});
+  }, [refreshAll]);
 
   async function handleAdminLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -204,8 +267,10 @@ export default function AdminPage() {
           : [origin];
       if (!list.includes(origin)) list.unshift(origin);
 
+      const saved = rememberedBrowser ? readRememberedAdmin() : null;
       const initialPassMap: Record<string, string> = {};
-      for (const u of list) initialPassMap[u] = loginPass;
+      for (const u of list) initialPassMap[u] = (saved && saved[u]) || loginPass;
+      if (rememberedBrowser) writeRememberedAdmin(initialPassMap);
       setPasswordsByUrl(initialPassMap);
       setDomainUrls(list);
       setUnlocked(true);
@@ -231,11 +296,13 @@ export default function AdminPage() {
         });
         const data = await res.json().catch(() => null);
         if (!res.ok) throw new Error(data?.error?.message || "Chưa lưu được trạng thái nhớ mật khẩu.");
+        writeRememberedAdmin(passwordsByUrl);
         setRememberedBrowser(true);
         setNotice({ kind: "success", text: "Đã bật nhớ mật khẩu trên trình duyệt này trong 30 ngày." });
       } else {
         const res = await fetch("/api/session", { method: "DELETE" });
         if (!res.ok) throw new Error("Chưa hủy được trạng thái nhớ mật khẩu.");
+        clearRememberedAdmin();
         setRememberedBrowser(false);
         setNotice({ kind: "info", text: "Đã hủy nhớ mật khẩu trên trình duyệt này." });
       }
@@ -305,11 +372,16 @@ export default function AdminPage() {
 
       const nextPassMap = { ...passwordsByUrl, [url]: fields.newPass };
       setPasswordsByUrl(nextPassMap);
+      if (rememberedBrowser) {
+        if (url === window.location.origin) {
+          clearRememberedAdmin();
+          setRememberedBrowser(false);
+        } else {
+          writeRememberedAdmin(nextPassMap);
+        }
+      }
       setPwFields(p => ({ ...p, [url]: { oldPass: "", newPass: "", confirmPass: "" } }));
       setPwFormOpen(p => ({ ...p, [url]: false }));
-      if (url === window.location.origin) {
-        setRememberedBrowser(false);
-      }
       setNotice({
         kind: "success",
         text: `Đã đổi mật khẩu cho ${url}. Miền này bắt nhập mật khẩu mới từ lần sau.`,
@@ -328,7 +400,12 @@ export default function AdminPage() {
     if (!pass) return;
     const nextMap = { ...passwordsByUrl, [url]: pass };
     setPasswordsByUrl(nextMap);
-    await fetchDomainCard(url, nextMap);
+    const ok = await fetchDomainCard(url, nextMap, true);
+    if (ok) {
+      setDomainAuthInput(p => ({ ...p, [url]: "" }));
+      if (rememberedBrowser) writeRememberedAdmin(nextMap);
+      setNotice({ kind: "success", text: `Đã xác nhận mật khẩu hiện tại cho ${url}.` });
+    }
   }
 
   const combinedLogs = useMemo(() => {
@@ -449,7 +526,9 @@ export default function AdminPage() {
                         onChange={e => setDomainAuthInput(p => ({ ...p, [url]: e.target.value }))}
                         required
                       />
-                      <button type="submit" className="primary">Xác nhận</button>
+                      <button type="submit" className="primary" disabled={Boolean(card?.loading)}>
+                        {card?.loading ? "…" : "Xác nhận"}
+                      </button>
                     </div>
                   </form>
                 ) : card?.error ? (
