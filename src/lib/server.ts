@@ -92,7 +92,7 @@ export async function guardAsync(req: NextRequest) {
 export function getGeminiConfig() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === "your_gemini_api_key_here") {
-    throw new AppError("MISSING_KEY", "Chưa cấu hình Gemini API key trên máy chủ.", 503);
+    throw new AppError("MISSING_KEY", "Chưa cấu hình API key AI trên máy chủ.", 503);
   }
   return { apiKey, model: process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL };
 }

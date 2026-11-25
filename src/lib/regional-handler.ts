@@ -46,7 +46,7 @@ export async function handleRegional(request: Request, env: RegionalEnv, api = s
     if (request.method !== "POST") throw new AppError("METHOD_NOT_ALLOWED", "Chỉ chấp nhận GET hoặc POST.", 405);
     const action = new URL(request.url).searchParams.get("action");
     if (action !== "connection" && action !== "analyze") throw new AppError("INVALID_BODY", "Thao tác backend không hợp lệ.");
-    if (!configured) throw new AppError("MISSING_KEY", "Backend Vercel chưa được cấu hình Gemini API key.", 503);
+    if (!configured) throw new AppError("MISSING_KEY", "Backend Vercel chưa được cấu hình API key AI.", 503);
     api.limit();
     const gemini = { apiKey: env.GEMINI_API_KEY!, model };
     if (action === "connection") {
