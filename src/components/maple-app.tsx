@@ -15,7 +15,7 @@ const PREVIEW_ONLY = process.env.NEXT_PUBLIC_PREVIEW_ONLY === "true";
 async function request<T>(path: string, init?: RequestInit, timeout = 25_000, abortSignal?: AbortSignal): Promise<T> {
   if (PREVIEW_ONLY) {
     if (path === "/api/status") return { configured: false, model: "demo", authenticated: true, authRequired: false, authUnavailable: false, locked: false } as T;
-    throw new Error("Đây là demo giao diện chưa kết nối Gemini.");
+    throw new Error("Đây là demo giao diện chưa kết nối AI.");
   }
   const timeoutSignal = AbortSignal.timeout(timeout);
   const combinedSignal = abortSignal ? AbortSignal.any([timeoutSignal, abortSignal]) : timeoutSignal;
@@ -602,7 +602,7 @@ export default function MapleApp() {
       <div className="connection-strip" style={{ marginTop: 18 }}>
         <div className="connection-state">
           <span className={`connection-dot ${status?.configured ? "configured" : ""}`} />
-          <span>{status?.configured ? connectionVerified === true ? "Gemini đã kết nối" : connectionVerified === false ? "Kết nối chưa thành công" : "Gemini đã sẵn sàng" : "Chế độ dùng thử"}</span>
+          <span>{status?.configured ? connectionVerified === true ? "AI đã kết nối" : connectionVerified === false ? "Kết nối chưa thành công" : "AI đã sẵn sàng" : "Chế độ dùng thử"}</span>
         </div>
         <div className="connection-buttons">
           <button type="button" className={`text-button ${autoSolve ? "auto-on" : ""}`} onClick={() => setAutoSolve(v => !v)} title="Tự động gửi giải ngay khi dán hoặc chọn ảnh">
@@ -654,7 +654,7 @@ export default function MapleApp() {
 
         {/* Requirement 9: Result panel shows ONLY the suggested answer/reading — no cropped image, no original text, no explanation, no extra buttons */}
         <section ref={resultRef} className={`panel result-panel ${result ? "has-result" : ""}`} aria-labelledby="result-title" aria-live="polite" aria-busy={busy === "analyze"}>
-          <div className="panel-heading"><div className="panel-title"><span className="step-number muted">02</span><h2 id="result-title">Đáp án</h2></div><span className="ai-tag"><Sparkles size={12} /> GEMINI</span></div>
+          <div className="panel-heading"><div className="panel-title"><span className="step-number muted">02</span><h2 id="result-title">Đáp án</h2></div><span className="ai-tag"><Sparkles size={12} /> AI</span></div>
           {busy === "analyze" ? (
             <div className="result-empty">
               <div className="result-orb processing"><Zap size={29} /></div>
@@ -686,7 +686,7 @@ export default function MapleApp() {
 
     {cropOpen && imageUrl && <Modal title="Cắt vùng thử thách" onClose={() => setCropOpen(false)} className="crop-modal"><p className="modal-subtitle">Kéo ảnh, dùng hai ngón để phóng to. Giữ đủ câu hỏi và các phương án.</p><div className="crop-stage"><Cropper image={imageUrl} crop={crop} zoom={zoom} rotation={rotation} aspect={aspect} onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={(_, area) => setPixels(area)} showGrid /></div><div className="crop-controls"><label><ZoomIn size={16} /> Phóng to<input aria-label="Phóng to ảnh" type="range" min="1" max="4" step="0.05" value={zoom} onChange={e => setZoom(Number(e.target.value))} /></label><label><Expand size={16} /> Tỉ lệ khung<input aria-label="Tỉ lệ khung cắt" type="range" min="0.6" max="4" step="0.1" value={aspect} onChange={e => setAspect(Number(e.target.value))} /></label><div className="crop-rotation"><button className="secondary" onClick={() => setRotation(r => r - 90)}><RotateCcw size={16} /> −90°</button><label>Nghiêng {rotation}°<input aria-label="Góc xoay ảnh" type="range" min="-180" max="180" step="1" value={rotation} onChange={e => setRotation(Number(e.target.value))} /></label><button className="secondary" onClick={() => setRotation(r => r + 90)}><RotateCw size={16} /> +90°</button></div></div><button className="primary full-width" disabled={!pixels || reading} onClick={applyCrop}>{reading ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} Dùng vùng ảnh này</button></Modal>}
     {cameraOpen && <Modal title="Chụp vùng thử thách" onClose={closeCamera} className="camera-modal"><p className="modal-subtitle">Giữ camera sau thẳng với màn hình.</p><div className="camera-stage"><video ref={video} playsInline autoPlay muted /><div className="camera-guide" />{!cameraReady && !cameraError && <span className="camera-wait"><LoaderCircle size={22} className="spin" /> Đang mở camera…</span>}</div>{cameraError && <p role="alert" className="inline-error">{cameraError}</p>}<button className="primary full-width" disabled={!cameraReady} onClick={capture}><Camera size={18} /> Chụp ảnh</button><button className="secondary full-width" onClick={() => { closeCamera(); upload.current?.click(); }}><ImagePlus size={17} /> Chọn ảnh từ thư viện</button></Modal>}
-    {showHelp && <Modal title="Hướng dẫn nhanh" onClose={() => setShowHelp(false)}><div className="help-content"><p><b>1. Dán hoặc chụp ảnh.</b> Chụp màn hình câu hỏi rồi bấm nút <b>Dán ảnh</b> hoặc nhấn <b>Ctrl + V</b>.</p><p><b>2. Tự cắt &amp; tự giải.</b> Hệ thống tự cắt popup và gửi Gemini để trả về dòng đáp án nhanh nhất.</p></div></Modal>}
+    {showHelp && <Modal title="Hướng dẫn nhanh" onClose={() => setShowHelp(false)}><div className="help-content"><p><b>1. Dán hoặc chụp ảnh.</b> Chụp màn hình câu hỏi rồi bấm nút <b>Dán ảnh</b> hoặc nhấn <b>Ctrl + V</b>.</p><p><b>2. Tự cắt &amp; tự giải.</b> Hệ thống tự cắt popup và gửi AI để trả về dòng đáp án nhanh nhất.</p></div></Modal>}
     {historyOpen && (
       <Modal title="Lịch sử đã tra (lưu trên máy)" onClose={closeHistory} className="history-modal">
         <div className="history-head">
