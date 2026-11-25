@@ -4,7 +4,7 @@ import { validateAnalysis, type Analysis } from "../src/lib/contracts";
 import { providerError, providerDiagnostic, AppError } from "../src/lib/api-errors";
 import { consumeLimit } from "../src/lib/rate-limit";
 import { demoResult } from "../src/lib/demo";
-import { validateConnectionResponse } from "../src/lib/gemini-core";
+import { validateConnectionResponse, shouldFallback503, FALLBACK_MODEL } from "../src/lib/gemini-core";
 import { assertValidImageHeader } from "../src/lib/image-header";
 import {
   getAuthSigningSecret,
@@ -121,6 +121,14 @@ test("provider diagnostics contain only bounded codes, never raw credentials or 
   const network = providerDiagnostic({ name: "TypeError", message: "fetch failed", cause: { code: "ECONNRESET" } });
   assert.equal(network.networkCode, "ECONNRESET");
 });
+test("503 fallback triggers only for SERVICE_UNAVAILABLE on non-fallback model", () => {
+  assert.equal(shouldFallback503({ status: 503, message: "UNAVAILABLE" }, "gemini-3.5-flash-lite"), true);
+  assert.equal(shouldFallback503({ status: 503, message: "UNAVAILABLE" }, FALLBACK_MODEL), false);
+  assert.equal(shouldFallback503({ status: 429, message: "Rate limit" }, "gemini-3.5-flash-lite"), false);
+  assert.equal(shouldFallback503({ status: 401, message: "API key not valid" }, "gemini-3.5-flash-lite"), false);
+  assert.equal(shouldFallback503({ name: "TimeoutError" }, "gemini-3.5-flash-lite"), false);
+});
+
 test("connection checks accept completed text without requiring exact OK, but reject refusals/empty/truncated replies", () => {
   for (const text of ["OK", "OK.", "Kết nối hoạt động."]) {
     assert.doesNotThrow(() => validateConnectionResponse({ text, candidates: [{ finishReason: "STOP" }] } as GenerateContentResponse));
