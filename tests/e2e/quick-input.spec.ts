@@ -55,6 +55,10 @@ test("paste auto-solves and renders only line and answer without cropped image o
   await expect(page.locator(".answer-box strong")).toHaveText("둘째 문장");
   await expect(page.locator(".explanation, .options-list, .recognized, .typing-guide, .image-preview")).toHaveCount(0);
   expect(calls).toBe(1);
+  await page.getByRole("button", { name: "Lịch sử" }).click();
+  await expect(page.locator(".history-item")).toHaveCount(1);
+  await expect(page.locator(".history-item")).toContainText("Dòng 2");
+  await expect(page.locator(".history-item img")).toBeVisible();
 });
 
 test("unclear choice never presents a certain answer", async ({ page }) => {

@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Cropper from "react-easy-crop";
-import { AlertCircle, ArrowRight, Camera, Check, CircleHelp, ClipboardPaste, Clock3, Crop, Expand, ImagePlus, Leaf, LoaderCircle, Lock, LockKeyhole, RotateCcw, RotateCw, ScanLine, ShieldCheck, Sparkles, Unlock, Wifi, X, Zap, ZoomIn } from "lucide-react";
+import { AlertCircle, ArrowRight, Camera, Check, CircleHelp, ClipboardPaste, Clock3, Crop, Expand, History, ImagePlus, Leaf, LoaderCircle, Lock, LockKeyhole, RotateCcw, RotateCw, ScanLine, ShieldCheck, Sparkles, Trash2, Unlock, Wifi, X, Zap, ZoomIn } from "lucide-react";
 import { ACCEPTED_TYPES, type AnalysisResult, type ApiErrorBody, type ServerStatus, validateAnalysis } from "@/lib/contracts";
 import { autoCropPopup, canvasBlob, cropImage, prepareAndCropFile, prepareFile, type PixelCrop } from "@/lib/image";
 import type { PopupType } from "@/lib/popup-detection";
 import { demoResult } from "@/lib/demo";
+import { clearHistoryEntries, deleteHistoryEntry, listHistoryEntries, saveHistoryEntry, type HistoryEntry } from "@/lib/history-db";
 
 type Notice = { kind: "error" | "success" | "info"; text: string };
 const PREVIEW_ONLY = process.env.NEXT_PUBLIC_PREVIEW_ONLY === "true";
@@ -60,6 +61,10 @@ export default function MapleApp() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [dragging, setDragging] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<{ entry: HistoryEntry; url: string }[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyPreviewUrl, setHistoryPreviewUrl] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
@@ -122,11 +127,59 @@ export default function MapleApp() {
   }, [busy]);
   useEffect(() => () => { cameraGeneration.current++; stream.current?.getTracks().forEach(t => t.stop()); }, []);
   useEffect(() => {
-    if (!cropOpen && !cameraOpen && !showHelp) return;
+    if (!cropOpen && !cameraOpen && !showHelp && !historyOpen) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = previous; };
-  }, [cropOpen, cameraOpen, showHelp]);
+  }, [cropOpen, cameraOpen, showHelp, historyOpen]);
+
+  const historyUrlsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    historyUrlsRef.current = historyItems.map(i => i.url);
+  }, [historyItems]);
+
+  useEffect(() => {
+    return () => {
+      for (const url of historyUrlsRef.current) URL.revokeObjectURL(url);
+    };
+  }, []);
+
+  async function openHistory() {
+    setHistoryOpen(true);
+    setHistoryPreviewUrl(null);
+    setHistoryLoading(true);
+    try {
+      for (const url of historyUrlsRef.current) URL.revokeObjectURL(url);
+      const entries = await listHistoryEntries();
+      setHistoryItems(entries.map(entry => ({ entry, url: URL.createObjectURL(entry.imageBlob) })));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+  function closeHistory() {
+    setHistoryOpen(false);
+    setHistoryPreviewUrl(null);
+    for (const url of historyUrlsRef.current) URL.revokeObjectURL(url);
+    setHistoryItems([]);
+  }
+  async function removeHistoryItem(id: string) {
+    await deleteHistoryEntry(id);
+    setHistoryItems(prev => {
+      const removed = prev.find(i => i.entry.id === id);
+      if (removed) {
+        if (historyPreviewUrl === removed.url) setHistoryPreviewUrl(null);
+        URL.revokeObjectURL(removed.url);
+      }
+      return prev.filter(i => i.entry.id !== id);
+    });
+  }
+  async function clearAllHistory() {
+    await clearHistoryEntries();
+    setHistoryPreviewUrl(null);
+    for (const url of historyUrlsRef.current) URL.revokeObjectURL(url);
+    setHistoryItems([]);
+  }
 
   async function acceptFile(file?: File): Promise<Blob | null> {
     if (!file || fileBusy.current) return null;
@@ -305,8 +358,22 @@ export default function MapleApp() {
         imagePrepMs: data.imagePrepMs || 0,
       };
 
-      setResult({ ...data, analysis: validateAnalysis(data.analysis), timings });
+      const validated = validateAnalysis(data.analysis);
+      setResult({ ...data, analysis: validated, timings });
       resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+      // Save to local IndexedDB strictly after displaying the answer (0 ms impact on solve speed)
+      const savePayload = {
+        ts: Date.now(),
+        imageBlob: targetImage,
+        selectedOption: validated.selectedOption,
+        suggestedAnswer: validated.suggestedAnswer,
+        needsClearerImage: validated.needsClearerImage,
+        confidence: validated.confidence,
+        actionToAnswerMs,
+        geminiMs: data.geminiMs || 0,
+      };
+      queueMicrotask(() => { void saveHistoryEntry(savePayload); });
     } catch (e) {
       const err = e as Error & { status?: number; code?: string };
       if (err.name === "AbortError" && controller.signal.aborted) return;
@@ -514,7 +581,7 @@ export default function MapleApp() {
   return <>
     <header className="topbar"><div className="topbar-inner">
       <a className="brand" href="/" aria-label="MapleLens trang chủ"><MapleMark /><span>Maple<span className="brand-light">Lens</span></span><span className="beta">FAST</span></a>
-      <div className="header-actions"><span className="private-tag"><ShieldCheck size={15} /> Ảnh của bạn, quyền của bạn</span><a href="/admin" className="text-button">Quản trị</a><button className="icon-button" aria-label="Hướng dẫn sử dụng" onClick={() => setShowHelp(true)}><CircleHelp size={20} /></button></div>
+      <div className="header-actions"><span className="private-tag"><ShieldCheck size={15} /> Ảnh của bạn, quyền của bạn</span><button type="button" className="text-button" onClick={() => void openHistory()}><History size={14} /> Lịch sử</button><a href="/admin" className="text-button">Quản trị</a><button className="icon-button" aria-label="Hướng dẫn sử dụng" onClick={() => setShowHelp(true)}><CircleHelp size={20} /></button></div>
     </div></header>
     <main className="main-shell">
       <div className="connection-strip" style={{ marginTop: 18 }}>
@@ -605,6 +672,54 @@ export default function MapleApp() {
     {cropOpen && imageUrl && <Modal title="Cắt vùng thử thách" onClose={() => setCropOpen(false)} className="crop-modal"><p className="modal-subtitle">Kéo ảnh, dùng hai ngón để phóng to. Giữ đủ câu hỏi và các phương án.</p><div className="crop-stage"><Cropper image={imageUrl} crop={crop} zoom={zoom} rotation={rotation} aspect={aspect} onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={(_, area) => setPixels(area)} showGrid /></div><div className="crop-controls"><label><ZoomIn size={16} /> Phóng to<input aria-label="Phóng to ảnh" type="range" min="1" max="4" step="0.05" value={zoom} onChange={e => setZoom(Number(e.target.value))} /></label><label><Expand size={16} /> Tỉ lệ khung<input aria-label="Tỉ lệ khung cắt" type="range" min="0.6" max="4" step="0.1" value={aspect} onChange={e => setAspect(Number(e.target.value))} /></label><div className="crop-rotation"><button className="secondary" onClick={() => setRotation(r => r - 90)}><RotateCcw size={16} /> −90°</button><label>Nghiêng {rotation}°<input aria-label="Góc xoay ảnh" type="range" min="-180" max="180" step="1" value={rotation} onChange={e => setRotation(Number(e.target.value))} /></label><button className="secondary" onClick={() => setRotation(r => r + 90)}><RotateCw size={16} /> +90°</button></div></div><button className="primary full-width" disabled={!pixels || reading} onClick={applyCrop}>{reading ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} Dùng vùng ảnh này</button></Modal>}
     {cameraOpen && <Modal title="Chụp vùng thử thách" onClose={closeCamera} className="camera-modal"><p className="modal-subtitle">Giữ camera sau thẳng với màn hình.</p><div className="camera-stage"><video ref={video} playsInline autoPlay muted /><div className="camera-guide" />{!cameraReady && !cameraError && <span className="camera-wait"><LoaderCircle size={22} className="spin" /> Đang mở camera…</span>}</div>{cameraError && <p role="alert" className="inline-error">{cameraError}</p>}<button className="primary full-width" disabled={!cameraReady} onClick={capture}><Camera size={18} /> Chụp ảnh</button><button className="secondary full-width" onClick={() => { closeCamera(); upload.current?.click(); }}><ImagePlus size={17} /> Chọn ảnh từ thư viện</button></Modal>}
     {showHelp && <Modal title="Hướng dẫn nhanh" onClose={() => setShowHelp(false)}><div className="help-content"><p><b>1. Dán hoặc chụp ảnh.</b> Chụp màn hình câu hỏi rồi bấm nút <b>Dán ảnh</b> hoặc nhấn <b>Ctrl + V</b>.</p><p><b>2. Tự cắt &amp; tự giải.</b> Hệ thống tự cắt popup và gửi Gemini để trả về dòng đáp án nhanh nhất.</p></div></Modal>}
+    {historyOpen && (
+      <Modal title="Lịch sử đã tra (lưu trên máy)" onClose={closeHistory} className="history-modal">
+        <div className="history-head">
+          <span className="modal-subtitle" style={{ margin: 0 }}>Lưu tối đa 50 ảnh &amp; đáp án gần nhất ngay trên trình duyệt này.</span>
+          {historyItems.length > 0 && (
+            <button type="button" className="text-button delete-history-all" onClick={() => void clearAllHistory()}>
+              <Trash2 size={13} /> Xóa tất cả
+            </button>
+          )}
+        </div>
+        {historyPreviewUrl && (
+          <div className="history-zoom" onClick={() => setHistoryPreviewUrl(null)}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={historyPreviewUrl} alt="Ảnh lịch sử phóng to" />
+            <span>Bấm để thu gọn</span>
+          </div>
+        )}
+        {historyLoading ? (
+          <p className="history-empty">Đang tải lịch sử…</p>
+        ) : historyItems.length === 0 ? (
+          <p className="history-empty">Chưa có lịch sử tra cứu trên trình duyệt này.</p>
+        ) : (
+          <div className="history-list">
+            {historyItems.map(({ entry, url }) => (
+              <div key={entry.id} className="history-item">
+                <button type="button" className="history-thumb" onClick={() => setHistoryPreviewUrl(historyPreviewUrl === url ? null : url)} title="Bấm để xem ảnh lớn">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt="Ảnh đã tra" />
+                </button>
+                <div className="history-info">
+                  <div className="history-answer">
+                    {entry.selectedOption ? <span className="history-badge">Dòng {entry.selectedOption}</span> : <span className="history-badge warn">Chưa rõ</span>}
+                    <strong lang={entry.suggestedAnswer ? "ko" : "vi"}>{entry.suggestedAnswer || "Không có đáp án"}</strong>
+                  </div>
+                  <div className="history-meta">
+                    <span>{new Date(entry.ts).toLocaleTimeString("vi-VN", { hour12: false })} · {new Date(entry.ts).toLocaleDateString("vi-VN")}</span>
+                    <span>⚡ {(entry.actionToAnswerMs / 1000).toFixed(2)}s</span>
+                  </div>
+                </div>
+                <button type="button" className="icon-button" aria-label="Xóa mục này" onClick={() => void removeHistoryItem(entry.id)}>
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+    )}
   </>;
 }
 

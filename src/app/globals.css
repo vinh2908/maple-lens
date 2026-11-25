@@ -61,6 +61,23 @@
 .log-status.ok{background:#123528;color:#6ee7b7}
 .log-status.fail{background:#3a191c;color:#fca5a5}
 .empty-cell{text-align:center !important;color:var(--muted);padding:24px !important}
+.history-modal{width:620px}
+.history-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.delete-history-all{color:#fca5a5 !important;flex-shrink:0}
+.history-zoom{background:#080d15;border:1px solid #354153;border-radius:10px;padding:10px;margin-bottom:14px;text-align:center;cursor:pointer}
+.history-zoom img{max-width:100%;max-height:320px;object-fit:contain;display:block;margin:0 auto}
+.history-zoom span{display:block;font-size:10px;color:var(--muted);margin-top:6px}
+.history-empty{color:var(--muted);font-size:12px;text-align:center;padding:28px 10px}
+.history-list{display:flex;flex-direction:column;gap:10px;max-height:60dvh;overflow-y:auto}
+.history-item{display:flex;align-items:center;gap:12px;padding:10px;border:1px solid #283344;background:#0e1520;border-radius:10px}
+.history-thumb{width:76px;height:58px;flex-shrink:0;background:#070b11;border:1px solid #2c384a;border-radius:7px;overflow:hidden;padding:0}
+.history-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.history-info{flex:1;min-width:0}
+.history-answer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px}
+.history-answer strong{font-size:13px;color:#dff3e6;overflow-wrap:anywhere}
+.history-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;background:#163829;color:#6ee7b7;border:1px solid #2b5f47}
+.history-badge.warn{background:#3a2819;color:#f5c589;border-color:#69492c}
+.history-meta{display:flex;gap:12px;font-size:10px;color:var(--muted)}
 
 /* Khóa cố định bố cục 2 cột cho PC / Laptop: từ 440px trở lên */
 @media (min-width: 440px) {
