@@ -5,14 +5,14 @@ import { demoResult } from "../../src/lib/demo";
 test("mobile layout, example image, crop, rotate and explicit demo result", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Đọc thử thách." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dán ảnh, tự cắt." })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.getByRole("button", { name: "Thử ảnh minh họa", exact: true }).click();
   const image = page.getByRole("img", { name: "Ảnh thử thách đã chọn để xem trước" });
   await expect(image).toBeVisible();
   await page.getByRole("button", { name: "Xem kết quả minh họa" }).click();
   await expect(page.getByText("KẾT QUẢ MINH HỌA · VIẾT SẴN")).toBeVisible();
-  await page.getByRole("button", { name: "Sao chép chữ Hàn" }).click();
+  await page.getByRole("button", { name: "Sao chép câu đáp án" }).click();
   await page.getByRole("button", { name: "Cắt vùng thử thách", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Cắt vùng thử thách" });
   await expect(dialog).toBeVisible();
@@ -33,7 +33,6 @@ test("library upload handles the server missing-key response fixture without inv
   const image = await sharp({ create: { width: 700, height: 400, channels: 3, background: "#394f4d" } }).jpeg().toBuffer();
   await page.getByLabel("Chọn ảnh thử thách", { exact: true }).setInputFiles({ name: "challenge.jpg", mimeType: "image/jpeg", buffer: image });
   await expect(page.getByRole("img", { name: "Ảnh thử thách đã chọn để xem trước" })).toBeVisible();
-  await page.getByRole("button", { name: "Phân tích ảnh", exact: true }).click();
   await expect(page.locator(".notice[role=alert], .inline-error[role=alert]")).toContainText("Chưa cấu hình Gemini API key");
   await expect(page.getByText("ĐÁP ÁN ĐỀ XUẤT", { exact: true })).not.toBeVisible();
 });
@@ -73,12 +72,12 @@ test("refusal / malformed transport clears previous result, only one request per
   await page.getByRole("button", { name: "Xem kết quả minh họa" }).click();
   let calls = 0;
   await page.route("**/api/analyze", async route => { calls++; await route.fulfill({ status: 422, json: { error: { code: "REFUSED", message: "Gemini đã từ chối xử lý. Không có đáp án." } } }); });
-  await page.getByRole("button", { name: "Phân tích ảnh", exact: true }).click();
+  await page.getByRole("button", { name: "Phân tích lại", exact: true }).click();
   await expect(page.locator(".notice[role=alert], .inline-error[role=alert]")).toContainText("từ chối");
   await expect(page.getByText("ĐÁP ÁN ĐỀ XUẤT", { exact: true })).not.toBeVisible();
   expect(calls).toBe(1);
   await page.route("**/api/analyze", async route => route.fulfill({ status: 502, body: "not JSON" }));
-  await page.getByRole("button", { name: "Phân tích ảnh", exact: true }).click();
+  await page.getByRole("button", { name: "Phân tích lại", exact: true }).click();
   await expect(page.locator(".notice[role=alert], .inline-error[role=alert]")).toContainText("dữ liệu không hợp lệ");
 });
 
@@ -86,9 +85,9 @@ test("successful response rendering is tested with a labeled transport fixture",
   await page.route("**/api/analyze", route => route.fulfill({ json: demoResult }));
   await page.goto("/");
   await page.getByRole("button", { name: "Thử ảnh minh họa", exact: true }).click();
-  await page.getByRole("button", { name: "Phân tích ảnh", exact: true }).click();
+  await page.getByRole("button", { name: "Phân tích lại", exact: true }).click();
   await expect(page.getByText("KẾT QUẢ MINH HỌA · VIẾT SẴN")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sao chép chữ Hàn" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sao chép câu đáp án" })).toBeVisible();
 });
 
 test("backend validates image content, format, body and rejects cross-origin requests", async ({ request }) => {
@@ -100,17 +99,18 @@ test("backend validates image content, format, body and rejects cross-origin req
   const crossOrigin = await request.post("/api/connection", { headers: { origin: "https://untrusted.example" } }); expect(crossOrigin.status()).toBe(403);
 });
 
-test("automatically finds a blue popup, preserves all choices and restores original without any API call", async ({ page }) => {
+test("automatically finds a blue popup, preserves all choices and restores original without API call when auto-solve is off", async ({ page }) => {
   let calls = 0;
   await page.route("**/api/analyze", () => { calls++; });
   const rows = Array.from({ length: 5 }, (_, i) => `<rect x="300" y="205" width="255" height="27" fill="#becada" transform="translate(0 ${i * 55})"/>`).join("");
   const scene = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="650"><rect width="900" height="650" fill="#253025"/><rect x="275" y="100" width="305" height="455" fill="#255392"/>${rows}</svg>`;
   const buffer = await sharp(Buffer.from(scene)).png().toBuffer();
   await page.goto("/");
+  await page.getByRole("button", { name: /Tự giải:/ }).click();
   await page.getByLabel("Chọn ảnh thử thách", { exact: true }).setInputFiles({ name: "full-screen.png", mimeType: "image/png", buffer });
   const status = page.locator(".popup-status");
   await expect(status).toContainText("Đã tự cắt popup");
-  await expect(status).toContainText("Dạng 2 · Chọn câu");
+  await expect(status).toContainText("Nhận diện dạng chọn câu");
   const preview = page.getByRole("img", { name: "Ảnh thử thách đã chọn để xem trước" });
   const cropped = await preview.evaluate((img: HTMLImageElement) => ({ width: img.naturalWidth, height: img.naturalHeight }));
   expect(cropped.width).toBeGreaterThanOrEqual(305);

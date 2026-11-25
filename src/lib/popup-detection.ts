@@ -1,4 +1,4 @@
-export type PopupType = "distorted_text" | "sentence_choice" | "unknown";
+export type PopupType = "sentence_choice" | "unknown";
 export type PopupBounds = { x: number; y: number; width: number; height: number };
 export type PopupDetection = { bounds: PopupBounds; typeHint: PopupType; kind: "blue" | "light"; alreadyFramed: boolean };
 type Region = PopupBounds & { count: number };
@@ -44,11 +44,9 @@ function layout(data: Uint8ClampedArray, width: number, region: PopupBounds): { 
   const cg = samples ? sumG / samples : 80;
   const cb = samples ? sumB / samples : 140;
 
-  // Track wide horizontal contrast bars (>= 60% of card width)
+  // Track wide horizontal contrast bars (>= 55% of card width)
   let separateBars = 0;
   let inBar = false;
-  let maxBarHeight = 0;
-  let currentBarHeight = 0;
   let textRows = 0;
 
   for (let y = yStart; y < yEnd; y++) {
@@ -56,20 +54,15 @@ function layout(data: Uint8ClampedArray, width: number, region: PopupBounds): { 
     for (let x = x1; x < x2; x++) {
       const idx = (y * width + x) * 4;
       const diff = Math.abs(data[idx] - cr) + Math.abs(data[idx + 1] - cg) + Math.abs(data[idx + 2] - cb);
-      if (diff > 42) contrastPixels++;
+      if (diff > 40) contrastPixels++;
     }
 
     const ratio = contrastPixels / span;
-    const isWideBar = ratio > 0.58;
-
-    if (isWideBar) {
+    if (ratio > 0.55) {
       if (!inBar) {
         separateBars++;
         inBar = true;
-        currentBarHeight = 0;
       }
-      currentBarHeight++;
-      if (currentBarHeight > maxBarHeight) maxBarHeight = currentBarHeight;
     } else {
       inBar = false;
     }
@@ -77,16 +70,12 @@ function layout(data: Uint8ClampedArray, width: number, region: PopupBounds): { 
     if (ratio > 0.012) textRows++;
   }
 
-  // 3+ separate option bars: sentence_choice (Dạng 2 - Chọn câu)
-  if (separateBars >= 3) return { type: "sentence_choice", hasText: true };
-  // 1 or 2 prominent wide blocks with height >= 6% of card: distorted_text (Dạng 1 - Chữ biến dạng)
-  if (maxBarHeight >= Math.max(3, rh * 0.055)) return { type: "distorted_text", hasText: true };
+  // 2+ separate option bars indicates a multiple-choice card
+  if (separateBars >= 2) return { type: "sentence_choice", hasText: true };
   return { type: "unknown", hasText: textRows > rh * 0.015 };
 }
 
-// Universal color-agnostic layout detector.
-// Works for ANY card color (Blue, Charcoal, Purple, Brown, Green, Light)
-// and ANY captcha box color (Lime green, Magenta, Pink, Cyan, Yellow, Orange, White).
+// Universal color-agnostic layout detector optimized for MapleStory question popups.
 export function detectPopupPixels(data: Uint8ClampedArray, width: number, height: number): PopupDetection | null {
   if (width < 40 || height < 40 || data.length !== width * height * 4) return null;
 
@@ -100,17 +89,11 @@ export function detectPopupPixels(data: Uint8ClampedArray, width: number, height
 
   for (let p = 0; p < totalPixels; p++) {
     const i = p * 4; const r = data[i]; const g = data[i + 1]; const b = data[i + 2];
-    // Blue / Navy cards
     blue[p] = Number(b > 50 && b > r * 1.15 && b > g * 1.05 && r < 185);
-    // Dark grey / Charcoal / Black cards
     dark[p] = Number(Math.max(r, g, b) < 100 && Math.max(r, g, b) - Math.min(r, g, b) < 35);
-    // Purple / Violet cards
     purple[p] = Number(r > 55 && b > 65 && r > g * 1.15 && b > g * 1.15);
-    // Warm / Brown / Red cards
     warm[p] = Number(r > 60 && r > b * 1.15 && r > g * 1.05 && b < 120);
-    // Dark Green / Forest cards
     green[p] = Number(g > 55 && g > r * 1.15 && g > b * 1.05);
-    // Light / Cream / Grey cards
     light[p] = Number(Math.min(r, g, b) > 130 && Math.max(r, g, b) - Math.min(r, g, b) < 95);
   }
 

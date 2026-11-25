@@ -40,7 +40,7 @@ export async function handleRegional(request: Request, env: RegionalEnv, api = s
     const received = Buffer.from(request.headers.get("authorization") ?? "");
     const expected = Buffer.from(`Bearer ${token}`);
     if (received.length !== expected.length || !timingSafeEqual(received, expected)) throw new AppError("BACKEND_AUTH", "Yêu cầu đến backend vùng chưa được xác thực.", 401);
-    const model = env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
+    const model = env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite";
     const configured = Boolean(env.GEMINI_API_KEY && env.GEMINI_API_KEY !== "your_gemini_api_key_here");
     if (request.method === "GET") return json({ configured, model, region: env.VERCEL_REGION || null });
     if (request.method !== "POST") throw new AppError("METHOD_NOT_ALLOWED", "Chỉ chấp nhận GET hoặc POST.", 405);

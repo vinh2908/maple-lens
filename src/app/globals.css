@@ -21,6 +21,8 @@
 .timing-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:#10b98125;border:1px solid #10b98155;color:#34d399;border-radius:5px;font-family:monospace;font-size:12px;font-weight:700}
 .timing-stages{display:flex;flex-wrap:wrap;gap:12px;font-size:10px;color:#94a3b8}
 .timing-stages b{color:#cbd5e1;font-weight:600}
+.text-button.auto-on{color:#34d399;font-weight:600}
+.choice-line{color:#e6ffef;font-size:34px;font-weight:750;margin:8px 0 14px;letter-spacing:-.5px}
 
 /* Khóa cố định bố cục 2 cột cho PC / Laptop: từ 440px trở lên */
 @media (min-width: 440px) {

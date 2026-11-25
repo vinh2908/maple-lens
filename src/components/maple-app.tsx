@@ -2,15 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Cropper from "react-easy-crop";
-import { ArrowDown, ArrowRight, Camera, Check, CheckCheck, ChevronDown, CircleHelp, ClipboardPaste, Clock3, Copy, Crop, Expand, FileImage, ImagePlus, Leaf, LoaderCircle, LockKeyhole, Maximize, RotateCcw, RotateCw, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, Wifi, X, AlertCircle, ZoomIn } from "lucide-react";
+import { ArrowRight, Camera, Check, CheckCheck, CircleHelp, ClipboardPaste, Clock3, Copy, Crop, Expand, FileImage, ImagePlus, Leaf, LoaderCircle, LockKeyhole, RotateCcw, RotateCw, ScanLine, ShieldCheck, Sparkles, Trash2, Wifi, X, AlertCircle, Zap, ZoomIn } from "lucide-react";
 import { ACCEPTED_TYPES, type AnalysisResult, type ApiErrorBody, type ServerStatus, validateAnalysis } from "@/lib/contracts";
-import { autoCropPopup, canvasBlob, cropImage, prepareFile, type PixelCrop } from "@/lib/image";
+import { autoCropPopup, canvasBlob, cropImage, prepareAndCropFile, prepareFile, type PixelCrop } from "@/lib/image";
 import type { PopupType } from "@/lib/popup-detection";
 import { demoResult } from "@/lib/demo";
-import { KoreanTypingGuide } from "@/components/korean-typing-guide";
 
 type Notice = { kind: "error" | "success" | "info"; text: string };
-const typeLabels = { distorted_text: "Dạng 1 · Chữ biến dạng", sentence_choice: "Dạng 2 · Chọn câu", unknown: "Chưa xác định loại" };
+const typeLabels: Record<PopupType, string> = { sentence_choice: "Chọn câu đúng", unknown: "Chưa xác định" };
 const PREVIEW_ONLY = process.env.NEXT_PUBLIC_PREVIEW_ONLY === "true";
 
 async function request<T>(path: string, init?: RequestInit, timeout = 25_000, abortSignal?: AbortSignal): Promise<T> {
@@ -48,6 +47,7 @@ export default function MapleApp() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageName, setImageName] = useState("");
   const [isDemo, setIsDemo] = useState(false);
+  const [autoSolve, setAutoSolve] = useState(true);
   const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState<"analyze" | "connection" | null>(null);
   const [connectionVerified, setConnectionVerified] = useState<boolean | null>(null);
@@ -64,7 +64,7 @@ export default function MapleApp() {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const [aspect, setAspect] = useState(2);
+  const [aspect, setAspect] = useState(1.2);
   const [pixels, setPixels] = useState<PixelCrop | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -75,6 +75,7 @@ export default function MapleApp() {
   const upload = useRef<HTMLInputElement>(null);
   const nativeCamera = useRef<HTMLInputElement>(null);
   const imagePanelRef = useRef<HTMLElement>(null);
+  const originalFileRef = useRef<File | null>(null);
   const pendingPaste = useRef<Promise<Blob | null> | null>(null);
   const fileBusy = useRef(false);
   const analysisBusy = useRef(false);
@@ -82,6 +83,8 @@ export default function MapleApp() {
   const resultRef = useRef<HTMLElement>(null);
   const activeAbort = useRef<AbortController | null>(null);
   const inputTimestamp = useRef<number>(0);
+
+  const locked = Boolean(status && !status.authenticated && status.authRequired);
 
   const refreshStatus = useCallback(async () => {
     try { setStatus(await request<ServerStatus>("/api/status", undefined, 10_000)); }
@@ -117,18 +120,42 @@ export default function MapleApp() {
     pendingPaste.current = null;
     fileBusy.current = true;
     setReading(true); setNotice(null); setResult(null); setImage(null); setOriginalImage(null); setAutoInfo(null);
+    originalFileRef.current = file;
+    let outBlob: Blob | null = null;
+    let outHint: PopupType = "unknown";
+    let outCropMs = 0;
     try {
-      const blob = await prepareFile(file);
-      setOriginalImage(blob);
-      const scanned = await autoCropPopup(blob);
-      setImage(scanned.blob); setImageName(file.name); setIsDemo(false);
-      setAutoInfo({ found: !!scanned.detection, alreadyFramed: !!scanned.detection?.alreadyFramed, typeHint: scanned.detection?.typeHint || "unknown", elapsedMs: scanned.elapsedMs, mode: "auto" });
-      return scanned.blob;
-    } catch (e) { setNotice({ kind: "error", text: (e as Error).message }); return null; }
-    finally { setReading(false); fileBusy.current = false; }
+      const scanned = await prepareAndCropFile(file);
+      outBlob = scanned.blob;
+      outHint = scanned.detection?.typeHint || "unknown";
+      outCropMs = scanned.elapsedMs;
+      setImage(scanned.blob);
+      setImageName(file.name);
+      setIsDemo(false);
+      setAutoInfo({
+        found: !!scanned.detection,
+        alreadyFramed: !!scanned.detection?.alreadyFramed,
+        typeHint: outHint,
+        elapsedMs: scanned.elapsedMs,
+        mode: "auto",
+      });
+    } catch (e) {
+      setNotice({ kind: "error", text: (e as Error).message });
+      return null;
+    } finally {
+      setReading(false);
+      fileBusy.current = false;
+    }
+
+    if (outBlob && autoSolve && !locked && !PREVIEW_ONLY && status?.configured !== false) {
+      void analyze(outBlob, outHint, outCropMs);
+    }
+    return outBlob;
   }
+
   async function loadDemo() {
     pendingPaste.current = null;
+    originalFileRef.current = null;
     setReading(true); setNotice(null); setResult(null);
     try {
       const res = await fetch("/demo-challenge.svg");
@@ -180,13 +207,24 @@ export default function MapleApp() {
   }
   function openCrop() { pendingPaste.current = null; setCrop({ x: 0, y: 0 }); setZoom(1); setRotation(0); setPixels(null); setCropOpen(true); }
   async function restoreOrScan() {
-    if (!originalImage || reading || busy) return;
+    if ((!originalImage && !originalFileRef.current) || reading || busy) return;
     pendingPaste.current = null;
     setResult(null);
-    if (image !== originalImage) { setImage(originalImage); setAutoInfo(i => i ? { ...i, mode: "original" } : null); return; }
     setReading(true);
     try {
-      const scanned = await autoCropPopup(originalImage); setImage(scanned.blob);
+      let baseOriginal = originalImage;
+      if (!baseOriginal && originalFileRef.current) {
+        baseOriginal = await prepareFile(originalFileRef.current);
+        setOriginalImage(baseOriginal);
+      }
+      if (!baseOriginal) return;
+      if (autoInfo?.mode !== "original") {
+        setImage(baseOriginal);
+        setAutoInfo(i => i ? { ...i, mode: "original" } : null);
+        return;
+      }
+      const scanned = await autoCropPopup(baseOriginal);
+      setImage(scanned.blob);
       setAutoInfo({ found: !!scanned.detection, alreadyFramed: !!scanned.detection?.alreadyFramed, typeHint: scanned.detection?.typeHint || "unknown", elapsedMs: scanned.elapsedMs, mode: "auto" });
     } catch { setNotice({ kind: "info", text: "Chưa tìm được popup. Ứng dụng giữ ảnh gốc để phân tích đầy đủ." }); }
     finally { setReading(false); }
@@ -194,7 +232,14 @@ export default function MapleApp() {
   async function applyCrop() {
     if (!pixels || !imageUrl) return;
     setReading(true);
-    try { setImage(await cropImage(imageUrl, pixels, rotation)); setResult(null); setCropOpen(false); setIsDemo(false); setAutoInfo(i => i ? { ...i, mode: "manual" } : null); }
+    try {
+      const cropped = await cropImage(imageUrl, pixels, rotation);
+      setImage(cropped); setResult(null); setCropOpen(false); setIsDemo(false);
+      setAutoInfo(i => i ? { ...i, mode: "manual" } : null);
+      if (autoSolve && !locked && !PREVIEW_ONLY && status?.configured !== false) {
+        void analyze(cropped);
+      }
+    }
     catch (e) { setNotice({ kind: "error", text: (e as Error).message }); }
     finally { setReading(false); }
   }
@@ -209,7 +254,7 @@ export default function MapleApp() {
     } catch (e) { setNotice({ kind: "error", text: (e as Error).message }); }
     finally { setReading(false); }
   }
-  async function analyze(targetImage: Blob | null = image) {
+  async function analyze(targetImage: Blob | null = image, hintOverride?: PopupType, cropScanMsOverride?: number) {
     if (!targetImage || analysisBusy.current) return;
     activeAbort.current?.abort();
     const controller = new AbortController();
@@ -219,8 +264,9 @@ export default function MapleApp() {
     const tActionStart = performance.now();
     try {
       const body = new FormData(); body.append("image", targetImage, "challenge.jpg");
-      if (autoInfo?.typeHint && autoInfo.typeHint !== "unknown") {
-        body.append("typeHint", autoInfo.typeHint);
+      const hint = hintOverride ?? autoInfo?.typeHint;
+      if (hint && hint !== "unknown") {
+        body.append("typeHint", hint);
       }
       const tNetworkStart = performance.now();
       const data = await request<AnalysisResult>("/api/analyze", { method: "POST", body }, 25_000, controller.signal);
@@ -231,7 +277,7 @@ export default function MapleApp() {
       const timings = {
         actionToAnswerMs,
         totalFromInputMs,
-        cropScanMs: autoInfo?.elapsedMs || 0,
+        cropScanMs: cropScanMsOverride ?? autoInfo?.elapsedMs ?? 0,
         networkMs,
         serverMs: data.serverMs || 0,
         geminiMs: data.geminiMs || 0,
@@ -341,6 +387,7 @@ export default function MapleApp() {
     setBusy(null);
     setReading(false);
     pendingPaste.current = null;
+    originalFileRef.current = null;
     inputTimestamp.current = 0;
     setImage(null); setImageUrl(null); setOriginalImage(null); setAutoInfo(null);
     setImageName(""); setResult(null); setNotice(null); setIsDemo(false); setCopied(false);
@@ -355,44 +402,43 @@ export default function MapleApp() {
     clearImage();
     void openCamera();
   }
-  const locked = Boolean(status && !status.authenticated && status.authRequired);
 
   return <>
     <header className="topbar"><div className="topbar-inner">
-      <a className="brand" href="/" aria-label="MapleLens trang chủ"><MapleMark /><span>Maple<span className="brand-light">Lens</span></span><span className="beta">BETA</span></a>
+      <a className="brand" href="/" aria-label="MapleLens trang chủ"><MapleMark /><span>Maple<span className="brand-light">Lens</span></span><span className="beta">FAST</span></a>
       <div className="header-actions"><span className="private-tag"><ShieldCheck size={15} /> Ảnh của bạn, quyền của bạn</span><button className="icon-button" aria-label="Hướng dẫn sử dụng" onClick={() => setShowHelp(true)}><CircleHelp size={20} /></button></div>
     </div></header>
     <main className="main-shell">
       <section className="hero">
-        <div className="hero-copy"><div className="eyebrow"><span className="status-dot" /> TRỢ LÝ TIẾNG HÀN · MAPLESTORY PC</div>
-          <h1>Đọc thử thách.<br /><span>Tiếp tục hành trình.</span></h1>
-          <p>Chụp màn hình, tự tìm và cắt popup thử thách.<br className="desktop-br" /> AI phân biệt hai dạng và gợi ý cách đọc.</p>
-          <div className="feature-pills"><span><ScanLine size={14} /> Chữ biến dạng</span><span><CheckCheck size={14} /> Chọn câu đúng</span><span><LockKeyhole size={13} /> Không lưu ảnh</span></div>
+        <div className="hero-copy"><div className="eyebrow"><span className="status-dot" /> GIẢI NHANH TRẮC NGHIỆM · MAPLESTORY PC</div>
+          <h1>Dán ảnh, tự cắt.<br /><span>Đáp án tức thì.</span></h1>
+          <p>Nhận ảnh, tự tìm &amp; cắt popup câu hỏi trên thiết bị.<br className="desktop-br" /> Tự động phân tích và chỉ ra dòng đáp án nhanh nhất.</p>
+          <div className="feature-pills"><span><ScanLine size={14} /> Tự cắt popup</span><span><CheckCheck size={14} /> Chọn câu đúng</span><span><Zap size={13} /> Tự giải khi dán</span><span><LockKeyhole size={13} /> Không lưu ảnh</span></div>
         </div>
-        <div className="hero-art" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><span className="art-spark one">✦</span><span className="art-spark two">+</span><div className="floating-leaf"><Leaf size={37} /></div><div className="korean-card"><span className="art-label"><span /> KOREAN CHALLENGE</span><strong lang="ko">한글을 읽다</strong><div className="art-scan" /><span className="art-card-footer"><ScanLine size={13} /> Từng nét chữ, thêm rõ ràng.</span></div><div className="art-check"><Check size={18} /></div><div className="art-caption">한 걸음씩, 함께.<span>Từng bước, cùng bạn.</span></div></div>
+        <div className="hero-art" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><span className="art-spark one">✦</span><span className="art-spark two">+</span><div className="floating-leaf"><Leaf size={37} /></div><div className="korean-card"><span className="art-label"><span /> QUESTION CHOICE</span><strong lang="ko">정답 선택</strong><div className="art-scan" /><span className="art-card-footer"><Zap size={13} /> Tự cắt &amp; giải siêu tốc.</span></div><div className="art-check"><Check size={18} /></div><div className="art-caption">한 걸음씩, 함께.<span>Nhanh gọn, chính xác.</span></div></div>
       </section>
 
-      <div className="connection-strip"><div className="connection-state"><span className={`connection-dot ${status?.configured ? "configured" : ""}`} /><span>{status?.configured ? connectionVerified === true ? "Gemini đã kết nối" : connectionVerified === false ? "Kết nối chưa thành công" : "Gemini đã được cấu hình" : "Chế độ dùng thử"}</span><span className="connection-detail">{status?.configured ? connectionVerified ? "Chưa xác minh độ chính xác" : "Bấm kiểm tra để xác nhận" : "Thử xử lý ảnh, chưa cần API key"}</span></div><div className="connection-buttons">{locked && <button className="text-button" onClick={() => setLogin(true)}><LockKeyhole size={13} /> Mở khóa</button>}<button className="text-button" onClick={checkConnection} disabled={!!busy}>{busy === "connection" ? <LoaderCircle className="spin" size={14} /> : <Wifi size={14} />}<span>{busy === "connection" ? "Đang kiểm tra…" : "Kiểm tra kết nối"}</span></button></div></div>
+      <div className="connection-strip"><div className="connection-state"><span className={`connection-dot ${status?.configured ? "configured" : ""}`} /><span>{status?.configured ? connectionVerified === true ? "Gemini đã kết nối" : connectionVerified === false ? "Kết nối chưa thành công" : "Gemini đã sẵn sàng" : "Chế độ dùng thử"}</span><span className="connection-detail">{status?.configured ? connectionVerified ? "Đã kiểm tra kết nối" : "Sẵn sàng giải siêu tốc" : "Thử xử lý ảnh, chưa cần API key"}</span></div><div className="connection-buttons"><button type="button" className={`text-button ${autoSolve ? "auto-on" : ""}`} onClick={() => setAutoSolve(v => !v)} title="Tự động gửi giải ngay khi dán hoặc chọn ảnh"><Zap size={13} /><span>Tự giải: {autoSolve ? "BẬT" : "TẮT"}</span></button>{locked && <button className="text-button" onClick={() => setLogin(true)}><LockKeyhole size={13} /> Mở khóa</button>}<button className="text-button" onClick={checkConnection} disabled={!!busy}>{busy === "connection" ? <LoaderCircle className="spin" size={14} /> : <Wifi size={14} />}<span>{busy === "connection" ? "Đang kiểm tra…" : "Kiểm tra kết nối"}</span></button></div></div>
       {notice && <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}><AlertCircle size={18} /><span>{notice.text}</span><button className="icon-button" aria-label="Đóng thông báo" onClick={() => setNotice(null)}><X size={16} /></button></div>}
 
       <div className="workspace">
         <section ref={imagePanelRef} className="panel image-panel" aria-labelledby="image-title" aria-describedby="paste-hint" tabIndex={0} onPaste={pasteImage} onKeyDown={analyzeOnEnter} onClick={e => { if (!(e.target as HTMLElement).closest("button, input, a")) e.currentTarget.focus({ preventScroll: true }); }}>
-          <div className="panel-heading"><div className="panel-title"><span className="step-number">01</span><h2 id="image-title">Ảnh thử thách</h2></div><span className="heading-meta">TỰ QUÉT · TỰ CẮT</span></div>
-          <p id="paste-hint" className="paste-hint">Bấm vào ô này → <kbd>Ctrl + V</kbd> dán ảnh → <kbd>Enter</kbd> phân tích. Mac: <kbd>⌘ + V</kbd>.</p>
+          <div className="panel-heading"><div className="panel-title"><span className="step-number">01</span><h2 id="image-title">Ảnh câu hỏi</h2></div><span className="heading-meta">TỰ CẮT · TỰ GIẢI</span></div>
+          <p id="paste-hint" className="paste-hint">Bấm <b>Dán ảnh</b> hoặc nhấn <kbd>Ctrl + V</kbd> (Mac: <kbd>⌘ + V</kbd>) để tự cắt &amp; giải ngay.</p>
           <input ref={upload} className="sr-only" aria-label="Chọn ảnh thử thách" type="file" accept={ACCEPTED_TYPES.join(",")} onChange={e => { void acceptFile(e.target.files?.[0]); e.target.value = ""; }} />
           <input ref={nativeCamera} className="sr-only" aria-label="Chụp bằng camera hệ thống" type="file" accept="image/*" capture="environment" onChange={e => { void acceptFile(e.target.files?.[0]); e.target.value = ""; }} />
           {!imageUrl ? <div className={`upload-zone ${dragging ? "dragging" : ""}`} onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={e => { e.preventDefault(); setDragging(false); void acceptFile(e.dataTransfer.files[0]); }}>
-            <div className="upload-illustration" aria-hidden="true"><div className="scan-corner tl" /><div className="scan-corner tr" /><div className="scan-corner bl" /><div className="scan-corner br" /><span className="sample-glyph" lang="ko">한</span><span className="tiny-spark">✦</span><span className="camera-badge"><Camera size={17} /></span></div>
-            <h3>{reading ? "Đang tự tìm popup…" : "Chụp ảnh, tự tìm thử thách"}</h3><p>Giữ trọn popup trong khung hình.<br />MapleLens tự quét và cắt vùng cần đọc.</p>
+            <div className="upload-illustration" aria-hidden="true"><div className="scan-corner tl" /><div className="scan-corner tr" /><div className="scan-corner bl" /><div className="scan-corner br" /><span className="sample-glyph" lang="ko">답</span><span className="tiny-spark">✦</span><span className="camera-badge"><Camera size={17} /></span></div>
+            <h3>{reading ? "Đang cắt popup…" : "Dán hoặc chụp ảnh câu hỏi"}</h3><p>MapleLens tự cắt gọn hộp câu hỏi<br />và tìm ngay đáp án đúng nhất.</p>
             <button className="primary camera-primary" onClick={openCamera} disabled={reading || !!busy}><Camera size={18} /> Mở camera sau <ArrowRight size={17} /></button>
             <div className="upload-actions-row">
               <button className="secondary upload-secondary" title="Chọn ảnh từ thư viện" aria-label="Chọn ảnh từ thư viện" onClick={() => upload.current?.click()} disabled={reading || !!busy}><ImagePlus size={16} /> Chọn ảnh</button>
               <button className="secondary paste-secondary" title="Dán ảnh từ bộ nhớ tạm (Clipboard)" aria-label="Dán ảnh" onClick={() => void pasteFromClipboard()} disabled={reading || !!busy}><ClipboardPaste size={16} /> Dán ảnh</button>
             </div>
-            <span className="upload-hint">JPEG, PNG, WebP · Ảnh gốc tối đa 15 MB</span>
+            <span className="upload-hint">JPEG, PNG, WebP · Tối ưu dưới 1 giây</span>
           </div> : <div className="image-workspace">
             <div className="image-toolbar">
-              <span><span className="status-dot" />{isDemo ? "Ảnh minh họa tự tạo" : "Ảnh sẵn sàng"}</span>
+              <span><span className="status-dot" />{isDemo ? "Ảnh minh họa" : "Ảnh sẵn sàng"}</span>
               <div>
                 <button title="Cắt vùng thử thách" aria-label="Cắt vùng thử thách" onClick={openCrop} disabled={reading || !!busy}><Crop size={17} /> Chỉnh</button>
                 <button title="Xoay ảnh 90 độ" aria-label="Xoay ảnh 90 độ" onClick={rotateImage} disabled={reading || !!busy}><RotateCw size={17} /> Xoay</button>
@@ -400,15 +446,15 @@ export default function MapleApp() {
                 <button title="Xóa ảnh này" aria-label="Xóa ảnh" onClick={clearImage} className="delete-image-btn"><X size={17} /> Xóa ảnh</button>
               </div>
             </div>
-            {autoInfo && <div className={`popup-status ${autoInfo.found ? "found" : "not-found"}`} role="status"><ScanLine size={17} /><div><b>{autoInfo.mode === "original" ? "Đang xem ảnh gốc" : autoInfo.mode === "manual" ? "Đã chỉnh vùng ảnh" : autoInfo.found ? `${autoInfo.alreadyFramed ? "Popup đã nằm gọn trong ảnh" : "Đã tự cắt popup"} · ${autoInfo.elapsedMs} ms` : "Chưa tìm rõ popup · giữ nguyên ảnh"}</b><span>{autoInfo.typeHint !== "unknown" ? `${typeLabels[autoInfo.typeHint]} · nhận dạng bố cục, AI sẽ xác nhận` : "AI sẽ tự xác định loại khi bạn bấm Phân tích"}</span></div>{originalImage && (image !== originalImage || autoInfo.mode === "original") && <button onClick={restoreOrScan} disabled={reading || !!busy}>{image !== originalImage ? "Ảnh gốc" : "Quét lại"}</button>}</div>}
+            {autoInfo && <div className={`popup-status ${autoInfo.found ? "found" : "not-found"}`} role="status"><ScanLine size={17} /><div><b>{autoInfo.mode === "original" ? "Đang xem ảnh gốc" : autoInfo.mode === "manual" ? "Đã chỉnh vùng ảnh" : autoInfo.found ? `${autoInfo.alreadyFramed ? "Popup đã vừa khung" : "Đã tự cắt popup"} · ${autoInfo.elapsedMs} ms` : "Chưa tìm rõ khung xanh · giữ ảnh đầy đủ"}</b><span>{autoInfo.typeHint === "sentence_choice" ? "Nhận diện dạng chọn câu" : "Sẵn sàng gửi AI tìm đáp án"}</span></div>{(originalImage || originalFileRef.current) && ((autoInfo.found && !autoInfo.alreadyFramed) || autoInfo.mode === "original") && <button onClick={restoreOrScan} disabled={reading || !!busy}>{autoInfo.mode !== "original" ? "Ảnh gốc" : "Quét lại"}</button>}</div>}
             <div className="image-preview">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imageUrl} alt="Ảnh thử thách đã chọn để xem trước" />
-              <button 
-                type="button" 
-                className="image-remove-badge" 
-                title="Xóa ảnh để chèn ảnh khác" 
-                aria-label="Xóa ảnh" 
+              <button
+                type="button"
+                className="image-remove-badge"
+                title="Xóa ảnh để chèn ảnh khác"
+                aria-label="Xóa ảnh"
                 onClick={clearImage}
               >
                 <X size={18} />
@@ -416,53 +462,56 @@ export default function MapleApp() {
               {reading && <div className="image-loading"><LoaderCircle className="spin" /> Đang xử lý…</div>}
             </div>
             <div className="image-file"><FileImage size={14} /><span>{imageName}</span><span>{image ? `${Math.round(image.size / 1024)} KB` : ""}</span></div>
-            <div className="image-tip"><ShieldCheck size={15} /><span>Tự quét trên thiết bị. Giữ đủ câu hỏi và mọi lựa chọn trong ảnh xem trước.</span></div>
+            <div className="image-tip"><ShieldCheck size={15} /><span>Cắt &amp; nén trên thiết bị. Giữ đủ câu hỏi và các dòng chọn.</span></div>
           </div>}
-          <div className="image-panel-footer">{!imageUrl ? <div className="demo-invite"><span>Chưa có ảnh trong tay?</span><button onClick={loadDemo} disabled={reading || !!busy}>Thử ảnh minh họa <ArrowRight size={14} /></button></div> : <div className="analyze-actions"><button className="primary analyze-button" onClick={locked ? () => setLogin(true) : () => void analyze()} disabled={reading || !!busy}>{busy === "analyze" ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{busy === "analyze" ? `Đang phân tích · ${elapsed}s` : "Phân tích ảnh"}{busy !== "analyze" && <ArrowRight size={17} />}</button>{isDemo && <button className="demo-result-button" onClick={() => { setResult(demoResult); setNotice(null); resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>Xem kết quả minh họa <ArrowRight size={13} /></button>}<span className="upload-hint"><ShieldCheck size={12} /> Gửi ảnh khi bấm Phân tích hoặc Enter</span></div>}</div>
+          <div className="image-panel-footer">{!imageUrl ? <div className="demo-invite"><span>Chưa có ảnh trong tay?</span><button onClick={loadDemo} disabled={reading || !!busy}>Thử ảnh minh họa <ArrowRight size={14} /></button></div> : <div className="analyze-actions"><button className="primary analyze-button" onClick={locked ? () => setLogin(true) : () => void analyze()} disabled={reading || !!busy}>{busy === "analyze" ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{busy === "analyze" ? `Đang giải · ${elapsed}s` : "Phân tích lại"}{busy !== "analyze" && <ArrowRight size={17} />}</button>{isDemo && <button className="demo-result-button" onClick={() => { setResult(demoResult); setNotice(null); resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>Xem kết quả minh họa <ArrowRight size={13} /></button>}<span className="upload-hint"><Zap size={12} /> {autoSolve ? "Đang bật tự giải ngay khi dán ảnh" : "Bấm Phân tích hoặc Enter để gửi ảnh"}</span></div>}</div>
         </section>
 
         <section ref={resultRef} className={`panel result-panel ${result ? "has-result" : ""}`} aria-labelledby="result-title" aria-live="polite" aria-busy={busy === "analyze"}>
-          <div className="panel-heading"><div className="panel-title"><span className="step-number muted">02</span><h2 id="result-title">Kết quả phân tích</h2></div><span className="ai-tag"><Sparkles size={12} /> GEMINI</span></div>
-          {busy === "analyze" ? <div className="result-empty"><div className="result-orb processing"><ScanLine size={29} /></div><h3>Đang đọc từng nét chữ…</h3><p>Gemini đang xem ảnh của bạn.<br />Kết quả thường cần một chút thời gian.</p><span className="elapsed"><Clock3 size={14} /> {elapsed} giây · Có thể chờ tối đa 25 giây</span></div> : result ? <div className="result-body">
+          <div className="panel-heading"><div className="panel-title"><span className="step-number muted">02</span><h2 id="result-title">Đáp án chọn câu</h2></div><span className="ai-tag"><Sparkles size={12} /> GEMINI</span></div>
+          {busy === "analyze" ? <div className="result-empty"><div className="result-orb processing"><Zap size={29} /></div><h3>Đang tìm đáp án…</h3><p>Đang đọc câu hỏi và chọn phương án đúng nhất.</p><span className="elapsed"><Clock3 size={14} /> {elapsed} giây</span></div> : result ? <div className="result-body">
             {result.source === "demo" && <div className="demo-banner"><Sparkles size={15} /><span>KẾT QUẢ MINH HỌA · VIẾT SẴN<br /><small>Không gọi Gemini, không dùng để trả lời ảnh khác.</small></span></div>}
-            
+
             {result.timings && (
               <div className="timing-readout" role="status">
                 <div className="timing-headline">
                   <span className="timing-badge">⚡ {(result.timings.actionToAnswerMs / 1000).toFixed(2)}s</span>
-                  <span>Từ khi bấm Phân tích → Có đáp án</span>
+                  <span>Thời gian giải câu hỏi</span>
                 </div>
                 <div className="timing-stages">
                   <span>Gemini AI: <b>{result.timings.geminiMs}ms</b></span>
                   <span>Mạng &amp; Server: <b>{Math.max(0, result.timings.networkMs - result.timings.geminiMs)}ms</b></span>
-                  {(result.timings.cropScanMs ?? 0) > 0 && <span>Tự quét ảnh: <b>{result.timings.cropScanMs}ms</b></span>}
-                  {result.timings.totalFromInputMs && <span>Toàn luồng: <b>{(result.timings.totalFromInputMs / 1000).toFixed(2)}s</b></span>}
+                  {(result.timings.cropScanMs ?? 0) > 0 && <span>Cắt ảnh: <b>{result.timings.cropScanMs}ms</b></span>}
+                  {result.timings.totalFromInputMs && <span>Tổng từ lúc dán: <b>{(result.timings.totalFromInputMs / 1000).toFixed(2)}s</b></span>}
                 </div>
               </div>
             )}
 
             <div className="result-type"><span>{typeLabels[result.analysis.challengeType]}</span><span className="elapsed"><Clock3 size={12} />{result.source === "demo" ? "Minh họa" : result.timings ? `${(result.timings.actionToAnswerMs / 1000).toFixed(2)}s` : `${(result.elapsedMs / 1000).toFixed(1)}s`}</span></div>
-            {result.analysis.challengeType !== "sentence_choice" && <><div className="result-label">CHỮ NHẬN DIỆN ĐƯỢC</div><div className="recognized" lang="ko">{result.analysis.recognizedText || "Chưa đọc được nội dung"}</div></>}
-            <div className={`answer-box ${result.analysis.needsClearerImage ? "uncertain" : ""}`}><div className="result-label">{result.analysis.needsClearerImage ? "CẦN ẢNH RÕ HƠN" : "ĐÁP ÁN ĐỀ XUẤT"}</div>{result.analysis.challengeType === "sentence_choice" && result.analysis.selectedOption && <div className="choice-line">Dòng {result.analysis.selectedOption}<small>Đếm từ trên xuống</small></div>}<strong lang={result.analysis.suggestedAnswer ? "ko" : "vi"}>{result.analysis.suggestedAnswer ? <>{result.analysis.suggestedAnswer}</> : "Chưa đủ cơ sở để đề xuất"}</strong><span><AlertCircle size={12} /> Gợi ý cần bạn kiểm tra lại</span></div>
-            {result.analysis.uncertainSegments.length > 0 && <div className="uncertainty-list"><h3>Phần chưa chắc chắn</h3>{result.analysis.uncertainSegments.map((s, i) => <p key={i}><b lang="ko">{s.text}</b>: {s.reason}{s.alternatives.length > 0 && <span> · Có thể là: <span lang="ko">{s.alternatives.join(" / ")}</span></span>}</p>)}</div>}
-            <KoreanTypingGuide key={JSON.stringify(result.analysis)} analysis={result.analysis} />
-            {result.analysis.explanation && result.analysis.explanation.trim() && <div className="explanation"><h3><Sparkles size={14} /> Giải thích</h3><p>{result.analysis.explanation}</p></div>}
+            <div className={`answer-box ${result.analysis.needsClearerImage ? "uncertain" : ""}`}>
+              <div className="result-label">{result.analysis.needsClearerImage ? "CẦN ẢNH RÕ HƠN" : "ĐÁP ÁN ĐỀ XUẤT"}</div>
+              {result.analysis.challengeType === "sentence_choice" && result.analysis.selectedOption && (
+                <div className="choice-line">Dòng {result.analysis.selectedOption}<small>Đếm từ trên xuống</small></div>
+              )}
+              <strong lang={result.analysis.suggestedAnswer ? "ko" : "vi"}>{result.analysis.suggestedAnswer ? <>{result.analysis.suggestedAnswer}</> : "Chưa đủ cơ sở để đề xuất (ảnh mờ hoặc không phải câu hỏi trắc nghiệm)"}</strong>
+              <span><AlertCircle size={12} /> Gợi ý cần bạn kiểm tra nhanh</span>
+            </div>
 
-            <button className="secondary copy-button" onClick={copyText} disabled={!result.analysis.recognizedText}>{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? "Đã sao chép" : "Sao chép chữ Hàn"}</button>
+            <button className="secondary copy-button" onClick={copyText} disabled={!result.analysis.suggestedAnswer}>{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? "Đã sao chép" : "Sao chép câu đáp án"}</button>
             <div className="next-image-actions"><button className="secondary" onClick={clearImage}><Trash2 size={16} /> Xóa ảnh</button><button className="primary" onClick={takeNewPhoto} disabled={reading || !!busy}><Camera size={17} /> Chụp ảnh mới</button></div>
-          </div> : <><div className="result-empty"><div className="result-orb"><ScanLine size={29} /><span className="orb-spark">✦</span></div><h3>Thêm một chút rõ ràng.</h3><p>Kết quả sẽ xuất hiện ở đây<br />sau khi bạn phân tích ảnh.</p><div className="empty-lines"><span /><span /><span /></div></div><div className="result-placeholder-footer"><span className="small-dot" /> Sẵn sàng khi bạn sẵn sàng</div></>}
-          <div className="result-disclaimer"><ShieldCheck size={14} /><p>AI có thể đọc sai. Chỉ tham khảo gợi ý và tự thao tác trong game.</p></div>
+          </div> : <><div className="result-empty"><div className="result-orb"><Zap size={29} /><span className="orb-spark">✦</span></div><h3>Sẵn sàng giải nhanh.</h3><p>Dán ảnh (Ctrl+V) hoặc bấm Dán ảnh.<br />Đáp án sẽ hiện ngay lập tức.</p><div className="empty-lines"><span /><span /><span /></div></div><div className="result-placeholder-footer"><span className="small-dot" /> Tự giải ngay khi nhận ảnh</div></>}
+          <div className="result-disclaimer"><ShieldCheck size={14} /><p>AI có thể đọc sai nếu ảnh quá mờ. Hãy đối chiếu nhanh dòng số trước khi bấm.</p></div>
         </section>
       </div>
 
-      <section className="how-it-works" aria-label="Cách sử dụng"><div className="how-title"><span>CÁCH DÙNG</span><h2>Ba bước, thật gọn.</h2></div><div className="how-step"><span className="how-icon"><Camera size={19} /></span><div><h3>01. Chụp hoặc chọn ảnh</h3><p>Giữ điện thoại thẳng, tránh lóa màn hình.</p></div></div><ArrowRight className="how-arrow" size={17} /><div className="how-step"><span className="how-icon"><Crop size={19} /></span><div><h3>02. Tự tìm và cắt popup</h3><p>Quét nhanh ngay trên điện thoại.</p></div></div><ArrowRight className="how-arrow" size={17} /><div className="how-step"><span className="how-icon"><Sparkles size={19} /></span><div><h3>03. Tự phân loại, nhận gợi ý</h3><p>Chữ biến dạng hoặc chọn câu đúng.</p></div></div></section>
-      <footer className="page-footer"><span><MapleMark small /> Làm rõ từng nét chữ.</span><span>Dự án thử nghiệm độc lập · Không liên kết với Nexon</span><span className="footer-version">v0.1 BETA <span /></span></footer>
+      <section className="how-it-works" aria-label="Cách sử dụng"><div className="how-title"><span>CÁCH DÙNG</span><h2>Một chạm, ra số.</h2></div><div className="how-step"><span className="how-icon"><ClipboardPaste size={19} /></span><div><h3>01. Chụp hoặc dán ảnh</h3><p>Bấm Dán ảnh hoặc Ctrl + V ngay sau khi chụp.</p></div></div><ArrowRight className="how-arrow" size={17} /><div className="how-step"><span className="how-icon"><Crop size={19} /></span><div><h3>02. Tự tìm và cắt popup</h3><p>Quét &amp; nén gọn chỉ trong ~40ms trên máy.</p></div></div><ArrowRight className="how-arrow" size={17} /><div className="how-step"><span className="how-icon"><Zap size={19} /></span><div><h3>03. Trả ngay số dòng đúng</h3><p>Hiện ngay dòng số 1, 2, 3... trong ~1 giây.</p></div></div></section>
+      <footer className="page-footer"><span><MapleMark small /> Giải nhanh thử thách chọn câu.</span><span>Dự án thử nghiệm độc lập · Không liên kết với Nexon</span><span className="footer-version">v0.2 FAST <span /></span></footer>
     </main>
 
-    {cropOpen && imageUrl && <Modal title="Cắt vùng thử thách" onClose={() => setCropOpen(false)} className="crop-modal"><p className="modal-subtitle">Kéo ảnh, dùng hai ngón để phóng to. Giữ đủ nội dung cần đọc.</p><div className="crop-stage"><Cropper image={imageUrl} crop={crop} zoom={zoom} rotation={rotation} aspect={aspect} onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={(_, area) => setPixels(area)} showGrid /></div><div className="crop-controls"><label><ZoomIn size={16} /> Phóng to<input aria-label="Phóng to ảnh" type="range" min="1" max="4" step="0.05" value={zoom} onChange={e => setZoom(Number(e.target.value))} /></label><label><Expand size={16} /> Tỉ lệ khung<input aria-label="Tỉ lệ khung cắt" type="range" min="0.6" max="4" step="0.1" value={aspect} onChange={e => setAspect(Number(e.target.value))} /></label><div className="crop-rotation"><button className="secondary" onClick={() => setRotation(r => r - 90)}><RotateCcw size={16} /> −90°</button><label>Nghiêng {rotation}°<input aria-label="Góc xoay ảnh" type="range" min="-180" max="180" step="1" value={rotation} onChange={e => setRotation(Number(e.target.value))} /></label><button className="secondary" onClick={() => setRotation(r => r + 90)}><RotateCw size={16} /> +90°</button></div></div><button className="primary full-width" disabled={!pixels || reading} onClick={applyCrop}>{reading ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} Dùng vùng ảnh này</button></Modal>}
+    {cropOpen && imageUrl && <Modal title="Cắt vùng thử thách" onClose={() => setCropOpen(false)} className="crop-modal"><p className="modal-subtitle">Kéo ảnh, dùng hai ngón để phóng to. Giữ đủ câu hỏi và các phương án.</p><div className="crop-stage"><Cropper image={imageUrl} crop={crop} zoom={zoom} rotation={rotation} aspect={aspect} onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={(_, area) => setPixels(area)} showGrid /></div><div className="crop-controls"><label><ZoomIn size={16} /> Phóng to<input aria-label="Phóng to ảnh" type="range" min="1" max="4" step="0.05" value={zoom} onChange={e => setZoom(Number(e.target.value))} /></label><label><Expand size={16} /> Tỉ lệ khung<input aria-label="Tỉ lệ khung cắt" type="range" min="0.6" max="4" step="0.1" value={aspect} onChange={e => setAspect(Number(e.target.value))} /></label><div className="crop-rotation"><button className="secondary" onClick={() => setRotation(r => r - 90)}><RotateCcw size={16} /> −90°</button><label>Nghiêng {rotation}°<input aria-label="Góc xoay ảnh" type="range" min="-180" max="180" step="1" value={rotation} onChange={e => setRotation(Number(e.target.value))} /></label><button className="secondary" onClick={() => setRotation(r => r + 90)}><RotateCw size={16} /> +90°</button></div></div><button className="primary full-width" disabled={!pixels || reading} onClick={applyCrop}>{reading ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} Dùng vùng ảnh này</button></Modal>}
     {cameraOpen && <Modal title="Chụp vùng thử thách" onClose={closeCamera} className="camera-modal"><p className="modal-subtitle">Giữ camera sau thẳng với màn hình. Không gửi video đến API.</p><div className="camera-stage"><video ref={video} playsInline autoPlay muted /><div className="camera-guide" />{!cameraReady && !cameraError && <span className="camera-wait"><LoaderCircle size={22} className="spin" /> Đang mở camera…</span>}</div>{cameraError && <p role="alert" className="inline-error">{cameraError}</p>}<button className="primary full-width" disabled={!cameraReady} onClick={capture}><Camera size={18} /> Chụp ảnh</button><button className="secondary full-width" onClick={() => { closeCamera(); upload.current?.click(); }}><ImagePlus size={17} /> Chọn ảnh từ thư viện</button></Modal>}
     {login && <Modal title="Mở khóa ứng dụng" onClose={() => { setLogin(false); setPassword(""); }}><p className="modal-subtitle">Nhập mật khẩu ứng dụng do chủ máy chủ thiết lập. Không nhập Gemini API key ở đây.</p><form onSubmit={signIn}><label className="field-label" htmlFor="app-password">Mật khẩu ứng dụng</label><input id="app-password" className="password-input" type="password" autoComplete="current-password" autoFocus required value={password} onChange={e => setPassword(e.target.value)} />{loginError && <p className="inline-error" role="alert">{loginError}</p>}<button className="primary full-width" disabled={loginBusy}>{loginBusy ? <LoaderCircle className="spin" size={17} /> : <LockKeyhole size={17} />} Mở khóa</button></form></Modal>}
-    {showHelp && <Modal title="Một chút hướng dẫn" onClose={() => setShowHelp(false)}><div className="help-content"><p><b>1. Chụp hoặc chọn ảnh.</b> Camera trực tiếp cần HTTPS và quyền camera. Nếu bị từ chối, chọn ảnh từ thư viện.</p><p><b>2. Tự tìm popup.</b> Ảnh vừa chọn được quét và cắt ngay trên thiết bị, không cần API. Nhãn loại ban đầu dựa trên bố cục; AI xác nhận khi phân tích. Nếu chưa tìm rõ, ứng dụng giữ nguyên ảnh. Bạn có thể xem ảnh gốc, chỉnh vùng hoặc xoay khi cần.</p><p><b>3. Bấm Phân tích.</b> AI tự phân biệt chữ biến dạng và chọn câu. Chỉ ảnh xem trước được gửi đến máy chủ và Gemini. Ứng dụng không lưu ảnh mặc định.</p><p><b>Chưa có API key?</b> Thử ảnh minh họa và xem kết quả viết sẵn. Key thật chỉ được cấu hình trên máy chủ.</p><p><b>Kiểm tra kết nối</b> dùng một yêu cầu văn bản ngắn; thành công không có nghĩa là AI giải đúng thử thách.</p><p>Chỉ dùng gợi ý trên điện thoại. Ứng dụng không tương tác với game. Chưa có dữ liệu đánh giá độ chính xác.</p></div></Modal>}
+    {showHelp && <Modal title="Hướng dẫn nhanh" onClose={() => setShowHelp(false)}><div className="help-content"><p><b>1. Dán hoặc chụp ảnh.</b> Chụp màn hình popup câu hỏi (Win + Shift + S), rồi bấm nút <b>Dán ảnh</b> hoặc nhấn <b>Ctrl + V</b>.</p><p><b>2. Tự cắt popup trong ~40ms.</b> Hệ thống tự tìm viền hộp MapleStory và cắt gọn ngay trên máy bạn, giữ đầy đủ câu hỏi và các đáp án 1, 2, 3...</p><p><b>3. Tự giải tức thì.</b> Khi chế độ <b>Tự giải: BẬT</b>, ảnh vừa cắt xong sẽ tự gửi lên Gemini để trả về đúng số dòng cần chọn trong khoảng 1 giây.</p><p><b>Lưu ý:</b> Ứng dụng chuyên cho thử thách chọn câu đúng. Chỉ ảnh xem trước được gửi xử lý và hoàn toàn không lưu lại.</p></div></Modal>}
   </>;
 }
 

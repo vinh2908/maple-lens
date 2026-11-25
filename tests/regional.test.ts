@@ -127,7 +127,7 @@ test("gateway relays raw bytes with service auth only, blocks redirects and vali
 });
 
 test("gateway rejects demo source, malformed and inconsistent successful results", async () => {
-  for (const data of [{ ...demoResult, model: env.GEMINI_MODEL }, { ok: true }, { ...demoResult, model: env.GEMINI_MODEL, source: "gemini", analysis: { ...demoResult.analysis, selectedOption: 3 } }]) {
+  for (const data of [{ ...demoResult, model: env.GEMINI_MODEL }, { ok: true }, { ...demoResult, model: env.GEMINI_MODEL, source: "gemini", analysis: { ...demoResult.analysis, challengeType: "unknown", selectedOption: 3 } }]) {
     await assert.rejects(regionalAnalyze(relay, new Uint8Array(1), async () => Response.json(data)), isCode("BACKEND_INVALID_RESPONSE"));
   }
   const low = await regionalAnalyze(relay, new Uint8Array(1), async () => Response.json({ ...demoResult, model: env.GEMINI_MODEL, source: "gemini", analysis: { ...demoResult.analysis, confidence: "low" } }));

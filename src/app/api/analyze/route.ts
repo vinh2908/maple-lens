@@ -29,11 +29,16 @@ export async function POST(req: NextRequest) {
       const formatType = { jpeg: "image/jpeg", png: "image/png", webp: "image/webp" }[meta.format as "jpeg" | "png" | "webp"];
       if (formatType !== file.type || (meta.pages ?? 1) > 1) throw new Error("INVALID_FORMAT");
       if (!meta.width || !meta.height || meta.width < 24 || meta.height < 24) throw new Error("TOO_SMALL");
-      normalized = await image.rotate().resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+      // Fast-path: client already normalized JPEG <= 960px with normal orientation — skip redundant re-encoding
+      if (formatType === "image/jpeg" && meta.width <= 960 && meta.height <= 960 && (!meta.orientation || meta.orientation === 1)) {
+        normalized = bytes;
+      } else {
+        normalized = await image.rotate().resize({ width: 850, height: 850, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+      }
     } catch { throw new AppError("INVALID_IMAGE", "Ảnh hỏng, quá lớn, quá nhỏ hoặc không đúng định dạng. Hãy chọn ảnh JPEG/PNG/WebP rõ hơn.", 415); }
     const imagePrepMs = Math.round(performance.now() - tPrepStart);
     const typeHint = form.get("typeHint")?.toString();
-    const validHint = typeHint === "distorted_text" || typeHint === "sentence_choice" ? typeHint : undefined;
+    const validHint = typeHint === "sentence_choice" ? typeHint : undefined;
     getGeminiConfig();
     const result = await analyzeImage(normalized, "image/jpeg", validHint);
     const serverMs = Math.round(performance.now() - started);

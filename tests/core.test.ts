@@ -7,16 +7,27 @@ import { demoResult } from "../src/lib/demo";
 import { validateConnectionResponse } from "../src/lib/gemini-core";
 import type { GenerateContentResponse } from "@google/genai";
 
-test("preserves literal Korean character order, including meaningless strings", () => {
-  const a = validateAnalysis({ ...demoResult.analysis, recognizedText: "바누리모", suggestedAnswer: "바누리모" });
-  assert.equal(a.suggestedAnswer, "바누리모");
+test("accepts ultra-compact sentence_choice payload without recognizedText or options", () => {
+  const a = validateAnalysis({
+    challengeType: "sentence_choice",
+    selectedOption: 2,
+    suggestedAnswer: "저는 학교에 갑니다.",
+    confidence: "high",
+    needsClearerImage: false,
+  });
+  assert.equal(a.selectedOption, 2);
+  assert.equal(a.suggestedAnswer, "저는 학교에 갑니다.");
+  assert.equal(a.recognizedText, "");
+  assert.deepEqual(a.options, []);
 });
+
 test("unclear image removes suggestions instead of guessing", () => {
   const a = validateAnalysis({ ...demoResult.analysis, needsClearerImage: true, confidence: "low" });
   assert.equal(a.suggestedAnswer, null);
   assert.equal(a.selectedOption, null);
   assert.equal(a.needsClearerImage, true);
 });
+
 const choice: Analysis = {
   ...demoResult.analysis, challengeType: "sentence_choice", recognizedText: "1. 저는 학교에 갑니다.\n2. 저는 학교를 갑니다.",
   suggestedAnswer: "저는 학교에 갑니다.", selectedOption: 1,
@@ -34,9 +45,10 @@ test("rejects mismatched answer / option and malformed output", () => {
   assert.throws(() => validateAnalysis({ ...choice, selectedOption: 3 }));
   assert.throws(() => validateAnalysis({ answer: "guess" }));
   assert.throws(() => validateAnalysis({ ...choice, suggestedAnswer: "", selectedOption: null }));
+  assert.throws(() => validateAnalysis({ ...demoResult.analysis, challengeType: "distorted_text" }));
 });
 test("unknown challenge cannot produce an answer", () => {
-  assert.equal(validateAnalysis({ ...demoResult.analysis, challengeType: "unknown" }).suggestedAnswer, null);
+  assert.equal(validateAnalysis({ ...demoResult.analysis, challengeType: "unknown", selectedOption: null, options: [] }).suggestedAnswer, null);
 });
 test("maps provider errors to specific safe messages without leaking key", () => {
   const cases: [unknown, string][] = [
