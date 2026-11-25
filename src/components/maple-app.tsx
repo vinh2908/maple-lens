@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Cropper from "react-easy-crop";
-import { AlertCircle, ArrowRight, Camera, Check, CircleHelp, ClipboardPaste, Clock3, Crop, Expand, History, ImagePlus, Leaf, LoaderCircle, Lock, LockKeyhole, RotateCcw, RotateCw, ScanLine, ShieldCheck, Sparkles, Trash2, Unlock, Wifi, X, Zap, ZoomIn } from "lucide-react";
+import { AlertCircle, ArrowRight, Camera, Check, CircleHelp, ClipboardPaste, Clock3, Crop, Expand, History, ImagePlus, LoaderCircle, Lock, LockKeyhole, RotateCcw, RotateCw, ScanLine, ShieldCheck, Sparkles, Trash2, Unlock, Wifi, X, Zap, ZoomIn } from "lucide-react";
 import { ACCEPTED_TYPES, type AnalysisResult, type ApiErrorBody, type ServerStatus, validateAnalysis } from "@/lib/contracts";
 import { autoCropPopup, canvasBlob, cropImage, prepareAndCropFile, prepareFile, type PixelCrop } from "@/lib/image";
 import type { PopupType } from "@/lib/popup-detection";
@@ -40,7 +40,22 @@ async function request<T>(path: string, init?: RequestInit, timeout = 25_000, ab
 }
 
 function MapleMark({ small = false }: { small?: boolean }) {
-  return <span className={`maple-mark ${small ? "small" : ""}`} aria-hidden="true"><Leaf size={small ? 19 : 25} strokeWidth={2} /></span>;
+  const size = small ? 20 : 28;
+  return (
+    <span className={`maple-mark ${small ? "small" : ""}`} aria-hidden="true">
+      <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
+        <path
+          d="M32 10L36 22L43 18.2L40.4 26.8L50 27.8L43.8 33.8L47.6 40.2L38.4 39.4L37.6 45.2L33.4 42.6V54H30.6V42.6L26.4 45.2L25.6 39.4L16.4 40.2L20.2 33.8L14 27.8L23.6 26.8L21 18.2L28 22L32 10Z"
+          fill="#ff995d"
+          stroke="#ffd4b8"
+          strokeOpacity="0.45"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+        <circle cx="49" cy="15" r="4" fill="#34d399" />
+      </svg>
+    </span>
+  );
 }
 
 export default function MapleApp() {
