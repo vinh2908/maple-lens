@@ -358,7 +358,7 @@ export default function MapleApp() {
       if (appToken) headers["x-app-token"] = appToken;
 
       const tNetworkStart = performance.now();
-      const data = await request<AnalysisResult>("/api/analyze", { method: "POST", body, headers }, 25_000, controller.signal);
+      const data = await request<AnalysisResult>("/api/analyze", { method: "POST", body, headers }, 10_000, controller.signal);
       const networkMs = Math.round(performance.now() - tNetworkStart);
       const actionToAnswerMs = Math.round(performance.now() - tActionStart);
       const totalFromInputMs = inputTimestamp.current ? Math.round(performance.now() - inputTimestamp.current) : actionToAnswerMs;

@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   return json(
     {
       configured: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "your_gemini_api_key_here"),
-      model: process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL,
+      model: state.preferredModel || process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL,
       authenticated: authenticatedWithState(req, state),
       authRequired,
       authUnavailable: !state.pwHash && !getFallbackPassword() && !isLocal(req),

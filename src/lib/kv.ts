@@ -11,6 +11,7 @@ export type UsageLogEntry = {
 export type DomainAuthState = {
   pwHash: string | null;
   locked: boolean;
+  preferredModel?: string | null;
 };
 
 export type DomainStats = {
@@ -19,6 +20,7 @@ export type DomainStats = {
   totalCount: number;
   locked: boolean;
   hasCustomPassword: boolean;
+  preferredModel?: string | null;
   logs: UsageLogEntry[];
 };
 
@@ -102,18 +104,21 @@ export function getFallbackPassword(): string {
 }
 
 export async function getDomainAuthState(domain: string): Promise<DomainAuthState> {
-  if (!kvConfigured()) return { pwHash: null, locked: false };
+  if (!kvConfigured()) return { pwHash: null, locked: false, preferredModel: null };
   try {
-    const [pwHash, locked] = await kvPipeline([
+    const [pwHash, locked, preferredRaw] = await kvPipeline([
       ["GET", `maple:v1:pw:${domain}`],
       ["GET", `maple:v1:locked:${domain}`],
+      ["GET", `maple:v1:prefer-model:${domain}`],
     ]);
+    const preferredModel = typeof preferredRaw === "string" && preferredRaw.trim() ? preferredRaw.trim() : null;
     return {
       pwHash: typeof pwHash === "string" && pwHash.startsWith("scrypt$") ? pwHash : null,
       locked: locked === "1" || locked === 1 || locked === true || locked === "true",
+      preferredModel,
     };
   } catch {
-    return { pwHash: null, locked: false };
+    return { pwHash: null, locked: false, preferredModel: null };
   }
 }
 
@@ -157,12 +162,13 @@ export async function getDomainStats(domain: string): Promise<DomainStats> {
   if (!kvConfigured()) {
     return { domain, todayCount: 0, totalCount: 0, locked: false, hasCustomPassword: false, logs: [] };
   }
-  const [rawLogs, totalRaw, dayRaw, lockedRaw, pwRaw] = await kvPipeline([
+  const [rawLogs, totalRaw, dayRaw, lockedRaw, pwRaw, preferredRaw] = await kvPipeline([
     ["LRANGE", `maple:v1:logs:${domain}`, 0, 99],
     ["GET", `maple:v1:total:${domain}`],
     ["GET", `maple:v1:day:${domain}:${today}`],
     ["GET", `maple:v1:locked:${domain}`],
     ["GET", `maple:v1:pw:${domain}`],
+    ["GET", `maple:v1:prefer-model:${domain}`],
   ]);
 
   const logs: UsageLogEntry[] = Array.isArray(rawLogs)
@@ -196,8 +202,18 @@ export async function getDomainStats(domain: string): Promise<DomainStats> {
     totalCount,
     locked: lockedRaw === "1" || lockedRaw === 1 || lockedRaw === true || lockedRaw === "true",
     hasCustomPassword: typeof pwRaw === "string" && pwRaw.startsWith("scrypt$"),
+    preferredModel: typeof preferredRaw === "string" && preferredRaw.trim() ? preferredRaw.trim() : null,
     logs,
   };
+}
+
+export async function setPreferredModelOverride(domain: string, model: string, ttlSeconds = 300): Promise<void> {
+  if (!kvConfigured()) return;
+  try {
+    await kvPipeline([["SET", `maple:v1:prefer-model:${domain}`, model, "EX", ttlSeconds]]);
+  } catch {
+    // Non-fatal: never block user flows on KV cooldown writes
+  }
 }
 
 export async function setDomainPassword(domain: string, newPassword: string): Promise<void> {

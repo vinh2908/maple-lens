@@ -2,9 +2,10 @@ import { after, NextRequest } from "next/server";
 import { AppError } from "@/lib/api-errors";
 import { ACCEPTED_TYPES, MAX_UPLOAD_BYTES } from "@/lib/contracts";
 import { assertValidImageHeader } from "@/lib/image-header";
-import { getSiteDomain, recordUsageLog } from "@/lib/kv";
+import { getSiteDomain, recordUsageLog, setPreferredModelOverride } from "@/lib/kv";
 import { boundedBody, errorResponse, getGeminiConfig, guardAsync, json } from "@/lib/server";
 import { analyzeImage } from "@/lib/gemini";
+import { MODEL_COOLDOWN_SECONDS } from "@/lib/gemini-core";
 
 export const runtime = "nodejs";
 export const maxDuration = 45;
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
   let shouldLog = false;
 
   try {
-    await guardAsync(req);
+    const { state } = await guardAsync(req);
     const type = req.headers.get("content-type") ?? "";
     if (!type.startsWith("multipart/form-data;")) {
       throw new AppError("INVALID_BODY", "Vui lòng gửi một ảnh bằng biểu mẫu tải lên.");
@@ -48,11 +49,14 @@ export async function POST(req: NextRequest) {
     getGeminiConfig();
 
     shouldLog = true;
-    const result = await analyzeImage(bytes, file.type, validHint);
+    const { cooldownModel, ...result } = await analyzeImage(bytes, file.type, validHint, state.preferredModel);
     const serverMs = Math.round(performance.now() - started);
 
     after(async () => {
-      await recordUsageLog(domain, { ts: Date.now(), domain, ok: true, ms: serverMs });
+      await Promise.all([
+        recordUsageLog(domain, { ts: Date.now(), domain, ok: true, ms: serverMs }),
+        cooldownModel ? setPreferredModelOverride(domain, cooldownModel, MODEL_COOLDOWN_SECONDS) : Promise.resolve(),
+      ]);
     });
 
     return json({ ...result, serverMs, imagePrepMs, elapsedMs: serverMs, source: "gemini" });

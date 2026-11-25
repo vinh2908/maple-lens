@@ -4,7 +4,7 @@ import { validateAnalysis, type Analysis } from "../src/lib/contracts";
 import { providerError, providerDiagnostic, AppError } from "../src/lib/api-errors";
 import { consumeLimit } from "../src/lib/rate-limit";
 import { demoResult } from "../src/lib/demo";
-import { validateConnectionResponse, shouldFallback503, FALLBACK_MODEL } from "../src/lib/gemini-core";
+import { validateConnectionResponse, shouldFallback503, FALLBACK_MODEL, runHedgedWithFallback } from "../src/lib/gemini-core";
 import { assertValidImageHeader } from "../src/lib/image-header";
 import {
   getAuthSigningSecret,
@@ -127,6 +127,91 @@ test("503 fallback triggers only for SERVICE_UNAVAILABLE on non-fallback model",
   assert.equal(shouldFallback503({ status: 429, message: "Rate limit" }, "gemini-3.5-flash-lite"), false);
   assert.equal(shouldFallback503({ status: 401, message: "API key not valid" }, "gemini-3.5-flash-lite"), false);
   assert.equal(shouldFallback503({ name: "TimeoutError" }, "gemini-3.5-flash-lite"), false);
+});
+
+test("hedged race uses only primary when fast, hedges on delay, rescues 503 early, and enforces hard cap", async () => {
+  // 1. Fast primary (< hedgeDelayMs) -> fallback never called
+  const seenFast: string[] = [];
+  const fastRes = await runHedgedWithFallback({
+    primaryModel: "gemini-3.5-flash-lite",
+    fallbackModel: FALLBACK_MODEL,
+    hedgeDelayMs: 60,
+    hardCapMs: 400,
+    runAttempt: async model => {
+      seenFast.push(model);
+      return "ok-" + model;
+    },
+  });
+  assert.equal(fastRes.model, "gemini-3.5-flash-lite");
+  assert.equal(fastRes.primaryFailed, false);
+  assert.deepEqual(seenFast, ["gemini-3.5-flash-lite"]);
+
+  // 2. Slow primary (> hedgeDelayMs) -> fallback starts, wins, and aborts primary
+  let primaryAborted = false;
+  const hedgedRes = await runHedgedWithFallback({
+    primaryModel: "gemini-3.5-flash-lite",
+    fallbackModel: FALLBACK_MODEL,
+    hedgeDelayMs: 25,
+    hardCapMs: 500,
+    runAttempt: (model, signal) => new Promise((resolve, reject) => {
+      if (model === "gemini-3.5-flash-lite") {
+        signal.addEventListener("abort", () => { primaryAborted = true; reject(Object.assign(new Error("Aborted"), { name: "AbortError" })); }, { once: true });
+        setTimeout(() => resolve("late"), 300);
+      } else {
+        setTimeout(() => resolve("fast-fallback"), 10);
+      }
+    }),
+  });
+  assert.equal(hedgedRes.model, FALLBACK_MODEL);
+  assert.equal(hedgedRes.value, "fast-fallback");
+  assert.equal(primaryAborted, true);
+
+  // 3. Primary fails with 503 before hedgeDelayMs -> fallback starts immediately without waiting
+  const t0 = Date.now();
+  const rescuedRes = await runHedgedWithFallback({
+    primaryModel: "gemini-3.5-flash-lite",
+    fallbackModel: FALLBACK_MODEL,
+    hedgeDelayMs: 500,
+    hardCapMs: 800,
+    runAttempt: async model => {
+      if (model === "gemini-3.5-flash-lite") throw { status: 503, message: "UNAVAILABLE" };
+      return "rescued";
+    },
+  });
+  assert.equal(rescuedRes.model, FALLBACK_MODEL);
+  assert.equal(rescuedRes.primaryFailed, true);
+  assert.ok(Date.now() - t0 < 200);
+
+  // 4. Non-retryable 401 -> fails immediately without calling fallback
+  const seenAuth: string[] = [];
+  await assert.rejects(
+    () => runHedgedWithFallback({
+      primaryModel: "gemini-3.5-flash-lite",
+      fallbackModel: FALLBACK_MODEL,
+      hedgeDelayMs: 100,
+      hardCapMs: 400,
+      runAttempt: async model => {
+        seenAuth.push(model);
+        throw { status: 401, message: "API key not valid" };
+      },
+    }),
+    (e: unknown) => e instanceof AppError && e.code === "INVALID_KEY"
+  );
+  assert.deepEqual(seenAuth, ["gemini-3.5-flash-lite"]);
+
+  // 5. Hard cap aborts hung attempts cleanly with TIMEOUT
+  await assert.rejects(
+    () => runHedgedWithFallback({
+      primaryModel: "gemini-3.5-flash-lite",
+      fallbackModel: FALLBACK_MODEL,
+      hedgeDelayMs: 20,
+      hardCapMs: 80,
+      runAttempt: (_model, signal) => new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(Object.assign(new Error("Aborted"), { name: "AbortError" })), { once: true });
+      }),
+    }),
+    (e: unknown) => e instanceof AppError && e.code === "TIMEOUT" && e.status === 504
+  );
 });
 
 test("connection checks accept completed text without requiring exact OK, but reject refusals/empty/truncated replies", () => {

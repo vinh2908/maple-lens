@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
         ...stats,
         online: true,
         configured: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "your_gemini_api_key_here"),
-        model: process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL,
+        model: stats.preferredModel || process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL,
         kvConfigured: kvConfigured(),
         domainsList: getDomainsList(),
       },
