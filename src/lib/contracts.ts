@@ -5,11 +5,10 @@ export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 export const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
 export const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
-// Ultra-compact schema sent to Gemini to minimize output tokens and latency.
+// Ultra-compact schema sent to AI to minimize output tokens and latency.
 export const geminiChoiceSchema = z.object({
   challengeType: z.enum(["sentence_choice", "unknown"]),
   selectedOption: z.number().int().min(1).max(12).nullable(),
-  suggestedAnswer: z.string().max(1500).nullable(),
   confidence: z.enum(["high", "medium", "low"]),
   needsClearerImage: z.boolean(),
 });
@@ -17,7 +16,7 @@ export const geminiChoiceSchema = z.object({
 export const analysisSchema = z.object({
   challengeType: z.enum(["sentence_choice", "unknown"]),
   recognizedText: z.string().max(6000).default(""),
-  suggestedAnswer: z.string().max(2000).nullable(),
+  suggestedAnswer: z.string().max(2000).nullable().default(null),
   selectedOption: z.number().int().min(1).max(12).nullable(),
   options: z.array(z.object({
     index: z.number().int().min(1).max(12),

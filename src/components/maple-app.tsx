@@ -665,12 +665,18 @@ export default function MapleApp() {
             <div className="result-body">
               <div className={`answer-box ${result.analysis.needsClearerImage ? "uncertain" : ""}`}>
                 <div className="result-label">{result.analysis.needsClearerImage ? "CHƯA ĐỌC RÕ" : "ĐÁP ÁN GỢI Ý"}</div>
-                {result.analysis.challengeType === "sentence_choice" && result.analysis.selectedOption && (
-                  <div className="choice-line">Dòng {result.analysis.selectedOption}</div>
+                {result.analysis.challengeType === "sentence_choice" && result.analysis.selectedOption ? (
+                  <>
+                    <div className="choice-line">Dòng {result.analysis.selectedOption}</div>
+                    {result.analysis.suggestedAnswer && (
+                      <strong lang="ko">{result.analysis.suggestedAnswer}</strong>
+                    )}
+                  </>
+                ) : (
+                  <strong lang={result.analysis.suggestedAnswer ? "ko" : "vi"}>
+                    {result.analysis.suggestedAnswer || "Chưa đủ cơ sở để đề xuất"}
+                  </strong>
                 )}
-                <strong lang={result.analysis.suggestedAnswer ? "ko" : "vi"}>
-                  {result.analysis.suggestedAnswer || "Chưa đủ cơ sở để đề xuất"}
-                </strong>
               </div>
             </div>
           ) : (
@@ -719,7 +725,11 @@ export default function MapleApp() {
                 <div className="history-info">
                   <div className="history-answer">
                     {entry.selectedOption ? <span className="history-badge">Dòng {entry.selectedOption}</span> : <span className="history-badge warn">Chưa rõ</span>}
-                    <strong lang={entry.suggestedAnswer ? "ko" : "vi"}>{entry.suggestedAnswer || "Không có đáp án"}</strong>
+                    {entry.suggestedAnswer ? (
+                      <strong lang="ko">{entry.suggestedAnswer}</strong>
+                    ) : !entry.selectedOption ? (
+                      <strong lang="vi">Không có đáp án</strong>
+                    ) : null}
                   </div>
                   <div className="history-meta">
                     <span>{new Date(entry.ts).toLocaleTimeString("vi-VN", { hour12: false })} · {new Date(entry.ts).toLocaleDateString("vi-VN")}</span>

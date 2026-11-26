@@ -5,8 +5,8 @@ import { AppError, providerError, providerDiagnostic } from "./api-errors";
 
 export type GeminiConfig = { apiKey: string; model: string };
 export const FALLBACK_MODEL = "gemini-3.1-flash-lite";
-export const HEDGE_DELAY_MS = 2_000;
-export const COOLDOWN_HEDGE_DELAY_MS = 4_000;
+export const HEDGE_DELAY_MS = 0;
+export const COOLDOWN_HEDGE_DELAY_MS = 0;
 export const ANALYZE_HARD_CAP_MS = 9_200;
 export const PROVIDER_HTTP_TIMEOUT_MS = 12_000;
 export const MODEL_COOLDOWN_SECONDS = 300;
@@ -15,9 +15,9 @@ export const ANALYSIS_INSTRUCTIONS = `Bạn là trợ lý giải nhanh thử th�
 Ảnh chứa một câu hỏi (hoặc chỗ trống) và các lựa chọn xếp từ TRÊN XUỐNG (đánh số 1, 2, 3, 4...).
 Nhiệm vụ:
 1. Chọn phương án đúng ngữ pháp và tự nhiên nhất theo câu hỏi.
-2. Trả về challengeType="sentence_choice", selectedOption (số thứ tự từ 1, đếm từ trên xuống), suggestedAnswer (nguyên văn lựa chọn đó), confidence ("high"|"medium"|"low"), needsClearerImage=false.
-3. Nếu ảnh không phải dạng chọn câu, bị che khuất hoặc quá mờ không thể đọc chắc chắn: challengeType="unknown", needsClearerImage=true, confidence="low", selectedOption=null, suggestedAnswer=null.
-Không giải thích, không chép lại các lựa chọn sai. Chỉ trả JSON theo schema.`;
+2. Trả về challengeType="sentence_choice", selectedOption (chỉ số thứ tự từ 1, đếm từ trên xuống), confidence ("high"|"medium"|"low"), needsClearerImage=false.
+3. Nếu ảnh không phải dạng chọn câu, bị che khuất hoặc quá mờ không thể đọc chắc chắn: challengeType="unknown", needsClearerImage=true, confidence="low", selectedOption=null.
+Không chép lại câu tiếng Hàn, không giải thích. Chỉ trả JSON theo schema.`;
 
 export function shouldFallback503(error: unknown, currentModel: string): boolean {
   return currentModel !== FALLBACK_MODEL && providerError(error).code === "SERVICE_UNAVAILABLE";
@@ -156,12 +156,17 @@ export async function runHedgedWithFallback<T>({
 
     launch(primaryModel, true);
     if (canHedge) {
-      hedgeTimer = setTimeout(() => {
-        if (!settled && !timedOut && !fallbackStarted) {
-          fallbackStarted = true;
-          launch(fallbackModel, false);
-        }
-      }, hedgeDelayMs);
+      if (hedgeDelayMs <= 0) {
+        fallbackStarted = true;
+        launch(fallbackModel, false);
+      } else {
+        hedgeTimer = setTimeout(() => {
+          if (!settled && !timedOut && !fallbackStarted) {
+            fallbackStarted = true;
+            launch(fallbackModel, false);
+          }
+        }, hedgeDelayMs);
+      }
     }
   });
 }
@@ -179,7 +184,7 @@ export async function analyzeWithGemini(
   const hedgeDelayMs = primaryModel === FALLBACK_MODEL ? COOLDOWN_HEDGE_DELAY_MS : HEDGE_DELAY_MS;
   const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: PROVIDER_HTTP_TIMEOUT_MS, retryOptions: { attempts: 1 } } });
 
-  const { value: analysis, model: usedModel, primaryFailed } = await runHedgedWithFallback({
+  const { value: analysis, model: usedModel } = await runHedgedWithFallback({
     primaryModel,
     fallbackModel,
     hedgeDelayMs,
@@ -190,7 +195,7 @@ export async function analyzeWithGemini(
         contents: [{
           role: "user",
           parts: [
-            { text: "Chọn 1 đáp án đúng nhất (đếm 1, 2, 3... từ trên xuống). Trả JSON." },
+            { text: "Chọn 1 số thứ tự đáp án đúng nhất (đếm 1, 2, 3... từ trên xuống). Trả JSON." },
             { inlineData: { mimeType, data: base64 } },
           ],
         }],
@@ -199,7 +204,7 @@ export async function analyzeWithGemini(
           responseMimeType: "application/json",
           responseJsonSchema: z.toJSONSchema(geminiChoiceSchema),
           thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
-          maxOutputTokens: 160,
+          maxOutputTokens: 64,
           temperature: 0,
           httpOptions: { timeout: PROVIDER_HTTP_TIMEOUT_MS },
           abortSignal: signal,
@@ -215,8 +220,7 @@ export async function analyzeWithGemini(
   });
 
   const geminiMs = Math.round(performance.now() - tStart);
-  const cooldownModel = model !== FALLBACK_MODEL && (usedModel === FALLBACK_MODEL || primaryFailed) ? FALLBACK_MODEL : undefined;
-  return { analysis, model: usedModel, geminiMs, cooldownModel };
+  return { analysis, model: usedModel, geminiMs, cooldownModel: undefined };
 }
 
 export async function testWithGemini({ apiKey, model }: GeminiConfig) {

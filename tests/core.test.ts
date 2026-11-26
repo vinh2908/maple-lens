@@ -57,6 +57,16 @@ test("accepts ultra-compact sentence_choice payload without recognizedText or op
   assert.equal(a.suggestedAnswer, "저는 학교에 갑니다.");
   assert.equal(a.recognizedText, "");
   assert.deepEqual(a.options, []);
+
+  const rowOnly = validateAnalysis({
+    challengeType: "sentence_choice",
+    selectedOption: 3,
+    confidence: "high",
+    needsClearerImage: false,
+  });
+  assert.equal(rowOnly.selectedOption, 3);
+  assert.equal(rowOnly.suggestedAnswer, null);
+  assert.equal(rowOnly.needsClearerImage, false);
 });
 
 test("unclear image removes suggestions instead of guessing", () => {
@@ -130,6 +140,23 @@ test("503 fallback triggers only for SERVICE_UNAVAILABLE on non-fallback model",
 });
 
 test("hedged race uses only primary when fast, hedges on delay, rescues 503 early, and enforces hard cap", async () => {
+  // 0. 0ms hedge launches both primary and fallback immediately and takes the faster one
+  const launchedZero: string[] = [];
+  const zeroRes = await runHedgedWithFallback({
+    primaryModel: "gemini-3.5-flash-lite",
+    fallbackModel: FALLBACK_MODEL,
+    hedgeDelayMs: 0,
+    hardCapMs: 500,
+    runAttempt: (model, signal) => new Promise((resolve, reject) => {
+      launchedZero.push(model);
+      signal.addEventListener("abort", () => reject(Object.assign(new Error("Aborted"), { name: "AbortError" })), { once: true });
+      setTimeout(() => resolve("win-" + model), model === FALLBACK_MODEL ? 10 : 120);
+    }),
+  });
+  assert.equal(launchedZero.length, 2);
+  assert.equal(zeroRes.model, FALLBACK_MODEL);
+  assert.equal(zeroRes.value, `win-${FALLBACK_MODEL}`);
+
   // 1. Fast primary (< hedgeDelayMs) -> fallback never called
   const seenFast: string[] = [];
   const fastRes = await runHedgedWithFallback({
